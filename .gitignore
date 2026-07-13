@@ -1,0 +1,22 @@
+# Visual Studio
+.vs/
+*.VC.db
+
+# Build outputs
+**/x64/
+**/Debug/
+**/Release/
+
+# Intermediate build files
+*.obj
+*.pdb
+*.ilk
+*.ipch
+
+# JUCE cache
+Builds/**/JuceLibraryCode/AppConfig.h
+
+# macOS
+.DS_Store
+
+*.vcxproj.user
