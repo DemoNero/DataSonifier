@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 
 <JUCERPROJECT id="QsA0uE" name="DataSonifier" projectType="audioplug" useAppConfig="0"
-              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1">
+              addUsingNamespaceToJuceHeader="0" jucerFormatVersion="1" pluginCharacteristicsValue="pluginProducesMidiOut,pluginWantsMidiIn">
   <MAINGROUP id="olSnT8" name="DataSonifier">
     <GROUP id="{D54E12AE-DDD7-2A0A-1245-30EA600E5AB9}" name="Source">
       <FILE id="rslSZb" name="PluginProcessor.cpp" compile="1" resource="0"

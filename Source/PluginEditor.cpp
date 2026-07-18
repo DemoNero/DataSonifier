@@ -43,6 +43,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             transformSelector.onChange = [this]()
                 {
                     updateProcessedSeries();
+                    audioProcessor.setProcessedSeries(processedSeries);
                 };
 
             seriesSelector.onChange = [this]()
@@ -51,6 +52,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
                     selectedColumn = seriesSelector.getSelectedId();
 
                     updateProcessedSeries();
+                    audioProcessor.setProcessedSeries(processedSeries);
 
                     int columnWidth = 120;
                     int tableWidth = csvTable.getWidth();
@@ -137,6 +139,39 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
                     }
                 });
         };
+    addAndMakeVisible(playbackSpeedLabel);
+    playbackSpeedLabel.setText(
+        "Speed",
+        juce::dontSendNotification);
+
+    addAndMakeVisible(playbackSpeedSlider);
+
+    playbackSpeedSlider.setSliderStyle(
+        juce::Slider::LinearHorizontal);
+
+    playbackSpeedSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight,
+        false,
+        80,
+        25);
+
+    playbackSpeedSlider.setRange(
+        0.25,
+        8.0,
+        0.25);
+
+    playbackSpeedSlider.setValue(
+        1.0,
+        juce::dontSendNotification);
+
+    playbackSpeedSlider.setTextValueSuffix(
+        " notes/s");
+
+    playbackSpeedSlider.onValueChange = [this]()
+        {
+            audioProcessor.setPlaybackSpeed(
+                playbackSpeedSlider.getValue());
+        };
     setSize(700, 650);
 }
 
@@ -156,6 +191,18 @@ void DataSonifierAudioProcessorEditor::resized()
     openCsvButton.setBounds(20, 20, 150, 30);
     seriesSelector.setBounds(20, 60, 220, 30);
     transformSelector.setBounds(260, 60, 150, 30);
+
+    playbackSpeedLabel.setBounds(
+        430,
+        60,
+        55,
+        30);
+
+    playbackSpeedSlider.setBounds(
+        485,
+        60,
+        getWidth() - 505,
+        30);
 
     csvTable.setBounds(
         20,
@@ -240,6 +287,7 @@ void DataSonifierAudioProcessorEditor::cellClicked(
     selectedColumn = columnId;
 
     updateProcessedSeries();
+    audioProcessor.setProcessedSeries(processedSeries);
 
     seriesSelector.setSelectedId(columnId, juce::dontSendNotification);
 
@@ -383,6 +431,7 @@ void DataSonifierAudioProcessorEditor::updateProcessedSeries()
     selectedCellLabel.setText(
         "Processed values: " + juce::String(validValueCount),
         juce::dontSendNotification);
+    
 }
 
 void DataSonifierAudioProcessorEditor::mouseDown(
@@ -408,6 +457,7 @@ void DataSonifierAudioProcessorEditor::mouseDown(
 
     // Recalculate the selected series and update the graph/table.
     updateProcessedSeries();
+    audioProcessor.setProcessedSeries(processedSeries);
 
     const int col = columnId - 1;
 

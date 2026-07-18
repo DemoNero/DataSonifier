@@ -53,7 +53,26 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
+    void setProcessedSeries(const std::vector<double>& series);
+
+    void setPlaybackSpeed(double notesPerSecond);
+
 private:
     //==============================================================================
+    std::shared_ptr<const std::vector<int>> midiNoteSeries;
+
+    size_t currentSeriesIndex = 0;
+
+    double currentSampleRate = 44100.0;
+
+    int samplesUntilNextNote = 0;
+    int samplesUntilNoteOff = -1;
+
+    int currentlyPlayingNote = -1;
+
+    bool wasTransportPlaying = false;
+
+    std::atomic<double> playbackSpeed{ 1.0 };
+    
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DataSonifierAudioProcessor)
 };

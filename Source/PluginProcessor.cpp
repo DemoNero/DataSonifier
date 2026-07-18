@@ -8,6 +8,10 @@
 
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <memory>
 
 //==============================================================================
 DataSonifierAudioProcessor::DataSonifierAudioProcessor()
@@ -91,10 +95,19 @@ void DataSonifierAudioProcessor::changeProgramName (int index, const juce::Strin
 }
 
 //==============================================================================
-void DataSonifierAudioProcessor::prepareToPlay (double sampleRate, int samplesPerBlock)
+void DataSonifierAudioProcessor::prepareToPlay(
+    double sampleRate,
+    int samplesPerBlock)
 {
-    // Use this method as the place to do any pre-playback
-    // initialisation that you need..
+    juce::ignoreUnused(samplesPerBlock);
+
+    currentSampleRate = sampleRate;
+
+    samplesUntilNextNote = 0;
+    samplesUntilNoteOff = -1;
+    currentlyPlayingNote = -1;
+    currentSeriesIndex = 0;
+    wasTransportPlaying = false;
 }
 
 void DataSonifierAudioProcessor::releaseResources()
@@ -156,6 +169,114 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
         // ..do something to the data...
     }
+
+    bool transportIsPlaying = false;
+
+    if (auto* playHead = getPlayHead())
+    {
+        if (auto position = playHead->getPosition())
+            transportIsPlaying = position->getIsPlaying();
+    }
+
+    // Ableton has just been stopped.
+    if (!transportIsPlaying)
+    {
+        // Prevent any incoming MIDI events from passing through.
+        midiMessages.clear();
+
+        // Send a note-off once if a note was active when Stop was pressed.
+        if (wasTransportPlaying && currentlyPlayingNote >= 0)
+        {
+            midiMessages.addEvent(
+                juce::MidiMessage::noteOff(
+                    1,
+                    currentlyPlayingNote),
+                0);
+        }
+
+        // Reset playback so the next Play starts from the first CSV value.
+        currentSeriesIndex = 0;
+        samplesUntilNextNote = 0;
+        samplesUntilNoteOff = -1;
+        currentlyPlayingNote = -1;
+        wasTransportPlaying = false;
+
+        return;
+    }
+
+    wasTransportPlaying = true;
+
+    auto notes = std::atomic_load(&midiNoteSeries);
+
+    const int blockSize = buffer.getNumSamples();
+
+    for (int sample = 0; sample < blockSize; ++sample)
+    {
+        // Send the note-off when its duration has finished.
+        if (samplesUntilNoteOff == 0 && currentlyPlayingNote >= 0)
+        {
+            midiMessages.addEvent(
+                juce::MidiMessage::noteOff(
+                    1,
+                    currentlyPlayingNote),
+                sample);
+
+            currentlyPlayingNote = -1;
+            samplesUntilNoteOff = -1;
+        }
+
+        // Start a new C4 note.
+        // Move to the next value once per second.
+        if (samplesUntilNextNote == 0)
+        {
+            constexpr int midiChannel = 1;
+            constexpr float velocity = 0.8f;
+
+            if (notes != nullptr && !notes->empty())
+            {
+                // Keep the index valid if a new CSV series has a different size.
+                currentSeriesIndex %= notes->size();
+
+                const int noteNumber =
+                    (*notes)[currentSeriesIndex];
+
+                // -1 represents an invalid/missing value, so play a rest.
+                if (noteNumber >= 0)
+                {
+                    midiMessages.addEvent(
+                        juce::MidiMessage::noteOn(
+                            midiChannel,
+                            noteNumber,
+                            velocity),
+                        sample);
+
+                    currentlyPlayingNote = noteNumber;
+
+                    samplesUntilNoteOff =
+                        static_cast<int>(currentSampleRate * 0.2);
+                }
+
+                ++currentSeriesIndex;
+
+                if (currentSeriesIndex >= notes->size())
+                    currentSeriesIndex = 0;
+            }
+
+            // Move to the next data value based on playback speed.
+            const double notesPerSecond =
+                playbackSpeed.load();
+
+            samplesUntilNextNote =
+                static_cast<int>(
+                    currentSampleRate / notesPerSecond);
+        }
+
+        if (samplesUntilNextNote > 0)
+            --samplesUntilNextNote;
+
+        if (samplesUntilNoteOff > 0)
+            --samplesUntilNoteOff;
+    }
 }
 
 //==============================================================================
@@ -188,4 +309,75 @@ void DataSonifierAudioProcessor::setStateInformation (const void* data, int size
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
 {
     return new DataSonifierAudioProcessor();
+}
+
+void DataSonifierAudioProcessor::setProcessedSeries(
+    const std::vector<double>& series)
+{
+    constexpr int lowestMidiNote = 48;  // C3
+    constexpr int highestMidiNote = 84; // C6
+
+    double minimum = std::numeric_limits<double>::infinity();
+    double maximum = -std::numeric_limits<double>::infinity();
+
+    // Find the minimum and maximum valid values.
+    for (double value : series)
+    {
+        if (!std::isfinite(value))
+            continue;
+
+        minimum = std::min(minimum, value);
+        maximum = std::max(maximum, value);
+    }
+
+    auto mappedNotes = std::make_shared<std::vector<int>>();
+    mappedNotes->reserve(series.size());
+
+    const bool hasValidValues =
+        std::isfinite(minimum) && std::isfinite(maximum);
+
+    for (double value : series)
+    {
+        // Missing values become rests.
+        if (!hasValidValues || !std::isfinite(value))
+        {
+            mappedNotes->push_back(-1);
+            continue;
+        }
+
+        int midiNote = 60;
+
+        if (minimum != maximum)
+        {
+            const double normalised =
+                (value - minimum) / (maximum - minimum);
+
+            midiNote = static_cast<int>(std::round(
+                lowestMidiNote
+                + normalised
+                * (highestMidiNote - lowestMidiNote)));
+        }
+
+        midiNote = juce::jlimit(
+            lowestMidiNote,
+            highestMidiNote,
+            midiNote);
+
+        mappedNotes->push_back(midiNote);
+    }
+
+    std::atomic_store(
+        &midiNoteSeries,
+        std::shared_ptr<const std::vector<int>>(mappedNotes));
+
+    DBG("Mapped "
+        << mappedNotes->size()
+        << " values to MIDI notes");
+}
+
+void DataSonifierAudioProcessor::setPlaybackSpeed(
+    double notesPerSecond)
+{
+    playbackSpeed.store(
+        juce::jlimit(0.25, 8.0, notesPerSecond));
 }

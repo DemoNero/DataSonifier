@@ -239,6 +239,10 @@ private:
     int selectedColumn = -1;
 
     juce::ComboBox transformSelector;
+
+    juce::Slider playbackSpeedSlider;
+    juce::Label playbackSpeedLabel;
+
     std::vector<double> processedSeries;
 
     juce::StringArray columnHeaders;
