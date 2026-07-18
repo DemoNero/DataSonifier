@@ -14,137 +14,86 @@
 DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifierAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
-    // Make sure that before the constructor has finished, you've set the
-    // editor's size to whatever you need it to be.
     addAndMakeVisible(openCsvButton);
-
     addAndMakeVisible(seriesGraph);
+    addAndMakeVisible(seriesSelector);
+    addAndMakeVisible(selectedCellLabel);
+    addAndMakeVisible(transformSelector);
+    addAndMakeVisible(csvTable);
+    addAndMakeVisible(playbackSpeedLabel);
+    addAndMakeVisible(playbackSpeedSlider);
+
+    seriesSelector.setTextWhenNothingSelected("Select series");
+
+    selectedCellLabel.setText("Selected cell: none", juce::dontSendNotification);
+    selectedCellLabel.setJustificationType(juce::Justification::topLeft);
+
+    transformSelector.addItem("None", 1);
+    transformSelector.addItem("ln", 2);
+    transformSelector.addItem("Difference", 3);
+
+    csvTable.setModel(this);
+    csvTable.getHeader().addMouseListener(this, false);
+    csvTable.getHeader().setStretchToFitActive(false);
 
     openCsvButton.onClick = [this]()
-        {
-            fileChooser = std::make_unique<juce::FileChooser>(
-                "Select a CSV file...",
-                juce::File{},
-                "*.csv");
+    {
+        fileChooser = std::make_unique<juce::FileChooser>(
+            "Select a CSV file...", juce::File{}, "*.csv");
 
-            addAndMakeVisible(seriesSelector);
-            seriesSelector.setTextWhenNothingSelected("Select series");
-
-            addAndMakeVisible(selectedCellLabel);
-            selectedCellLabel.setText("Selected cell: none", juce::dontSendNotification);
-            selectedCellLabel.setJustificationType(juce::Justification::topLeft);
-
-            addAndMakeVisible(transformSelector);
-            transformSelector.addItem("None", 1);
-            transformSelector.addItem("ln", 2);
-            transformSelector.addItem("Difference", 3);
-            transformSelector.setSelectedId(1);
-
-            transformSelector.onChange = [this]()
+        fileChooser->launchAsync(
+            juce::FileBrowserComponent::openMode
+                | juce::FileBrowserComponent::canSelectFiles,
+            [this](const juce::FileChooser& chooser)
+            {
+                if (audioProcessor.loadCsvFile(chooser.getResult()))
                 {
-                    updateProcessedSeries();
-                    audioProcessor.setProcessedSeries(processedSeries);
-                };
+                    selectedRow = -1;
+                    selectedHeaderColumn = -1;
+                    selectedCellLabel.setText("", juce::dontSendNotification);
+                    refreshFromProcessor();
+                }
+            });
+    };
 
-            seriesSelector.onChange = [this]()
-                {
-                    selectedRow = -1; // clear clicked cell
-                    selectedColumn = seriesSelector.getSelectedId();
+    transformSelector.onChange = [this]()
+    {
+        audioProcessor.setSelectedTransform(transformSelector.getSelectedId());
+        refreshFromProcessor();
 
-                    updateProcessedSeries();
-                    audioProcessor.setProcessedSeries(processedSeries);
+        int validValueCount = 0;
+        for (const auto value : processedSeries)
+            if (std::isfinite(value))
+                ++validValueCount;
 
-                    int columnWidth = 120;
-                    int tableWidth = csvTable.getWidth();
+        selectedCellLabel.setText(
+            "Processed values: " + juce::String(validValueCount),
+            juce::dontSendNotification);
+    };
 
-                    int targetX = ((selectedColumn - 1) * columnWidth)
-                        - (tableWidth / 2)
-                        + (columnWidth / 2);
+    seriesSelector.onChange = [this]()
+    {
+        selectedRow = -1;
+        selectedHeaderColumn = -1;
+        selectedCellLabel.setText("", juce::dontSendNotification);
 
-                    targetX = juce::jmax(0, targetX);
+        audioProcessor.setSelectedColumn(seriesSelector.getSelectedId());
+        refreshFromProcessor();
 
-                    csvTable.getViewport()->setViewPosition(
-                        targetX,
-                        csvTable.getViewport()->getViewPositionY());
+        constexpr int columnWidth = 120;
+        const int targetX = juce::jmax(0,
+            ((selectedColumn - 1) * columnWidth)
+                - (csvTable.getWidth() / 2)
+                + (columnWidth / 2));
 
-                    csvTable.repaint();
-                };
+        csvTable.getViewport()->setViewPosition(
+            targetX,
+            csvTable.getViewport()->getViewPositionY());
+    };
 
-            addAndMakeVisible(csvTable);
-            csvTable.setModel(this);
-
-            csvTable.getHeader().addMouseListener(this, false);
-
-            csvTable.getHeader().setStretchToFitActive(false);
-
-            fileChooser->launchAsync(
-                juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
-                [this](const juce::FileChooser& chooser)
-                {
-                    auto file = chooser.getResult();
-
-                    if (file.existsAsFile())
-                    {
-                        auto csvText = file.loadFileAsString();
-
-                        juce::StringArray lines;
-                        lines.addLines(csvText);
-
-                        csvData.clear();
-
-                        for (int i = 0; i < lines.size(); ++i)
-                        {
-                            juce::StringArray cells;
-                            cells.addTokens(lines[i], ",", "\"");
-                            cells.trim();
-
-                            csvData.push_back(cells);
-                        }
-
-                        seriesSelector.clear();
-
-                        if (!csvData.empty())
-                        {
-                            int columnCount = csvData[0].size();
-
-                            for (int col = 0; col < columnCount; ++col)
-                            {
-                                seriesSelector.addItem(
-                                    csvData[0][col],
-                                    col + 1);
-                            }
-                        }
-
-                        csvTable.getHeader().removeAllColumns();
-
-                        if (!csvData.empty())
-                        {
-                            int columnCount = csvData[0].size();
-
-                            for (int col = 0; col < columnCount; ++col)
-                            {
-                                csvTable.getHeader().addColumn(
-                                    csvData[0][col],     // use first row as header
-                                    col + 1,
-                                    120,120,120, juce::TableHeaderComponent::notSortable);                // maybe make them a bit wider
-                            }
-                        }
-                        columnHeaders = csvData[0];
-                        csvData.erase(csvData.begin());
-
-                        originalCsvData = csvData;
-
-                        csvTable.updateContent();
-                        csvTable.repaint();
-                    }
-                });
-        };
-    addAndMakeVisible(playbackSpeedLabel);
     playbackSpeedLabel.setText(
         "Speed",
         juce::dontSendNotification);
-
-    addAndMakeVisible(playbackSpeedSlider);
 
     playbackSpeedSlider.setSliderStyle(
         juce::Slider::LinearHorizontal);
@@ -160,23 +109,22 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         8.0,
         0.25);
 
-    playbackSpeedSlider.setValue(
-        1.0,
-        juce::dontSendNotification);
-
     playbackSpeedSlider.setTextValueSuffix(
         " notes/s");
 
-    playbackSpeedSlider.onValueChange = [this]()
-        {
-            audioProcessor.setPlaybackSpeed(
-                playbackSpeedSlider.getValue());
-        };
+    playbackSpeedAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "speed",
+            playbackSpeedSlider);
+
     setSize(700, 650);
+    refreshFromProcessor();
 }
 
 DataSonifierAudioProcessorEditor::~DataSonifierAudioProcessorEditor()
 {
+    csvTable.getHeader().removeMouseListener(this);
 }
 
 //==============================================================================
@@ -284,12 +232,9 @@ void DataSonifierAudioProcessorEditor::cellClicked(
     const juce::MouseEvent&)
 {
     selectedRow = rowNumber;
-    selectedColumn = columnId;
-
-    updateProcessedSeries();
-    audioProcessor.setProcessedSeries(processedSeries);
-
-    seriesSelector.setSelectedId(columnId, juce::dontSendNotification);
+    selectedHeaderColumn = -1;
+    audioProcessor.setSelectedColumn(columnId);
+    refreshFromProcessor();
 
     int col = columnId - 1;
 
@@ -304,134 +249,53 @@ void DataSonifierAudioProcessorEditor::cellClicked(
     csvTable.repaint();
 }
 
-void DataSonifierAudioProcessorEditor::updateProcessedSeries()
+void DataSonifierAudioProcessorEditor::refreshFromProcessor()
 {
-    csvData = originalCsvData;
-    processedSeries.clear();
+    const auto state = audioProcessor.getDataStateSnapshot();
 
-    if (selectedColumn <= 0 || csvData.empty())
-    {
-        seriesGraph.setValues({});
-        return;
-    }
+    csvData = state.displayData;
+    columnHeaders = state.columnHeaders;
+    processedSeries = state.processedSeries;
+    selectedColumn = state.selectedColumn;
 
-    const int col = selectedColumn - 1;
-    const int transform = transformSelector.getSelectedId();
+    rebuildTableColumns();
+    rebuildSeriesSelector();
 
-    if (col >= 0 && col < columnHeaders.size())
-        seriesGraph.setTitle(columnHeaders[col]);
+    seriesSelector.setSelectedId(selectedColumn, juce::dontSendNotification);
+    transformSelector.setSelectedId(state.selectedTransform, juce::dontSendNotification);
 
-    const double missingValue =
-        std::numeric_limits<double>::quiet_NaN();
-
-    // Attempts to parse the entire cell as a number.
-    auto tryParseNumber = [](const juce::String& input, double& result)
-        {
-            auto text = input.trim();
-
-            if (text.isEmpty() || !text.containsAnyOf("0123456789"))
-                return false;
-
-            // Reject text such as "2013 prices".
-            auto numericCharacters =
-                text.retainCharacters("0123456789+-.eE");
-
-            if (numericCharacters != text)
-                return false;
-
-            result = text.getDoubleValue();
-            return std::isfinite(result);
-        };
-
-    std::vector<double> rawValues;
-    rawValues.reserve(originalCsvData.size());
-
-    for (int row = 0; row < static_cast<int>(originalCsvData.size()); ++row)
-    {
-        if (col >= originalCsvData[row].size())
-        {
-            rawValues.push_back(missingValue);
-            continue;
-        }
-
-        double value = 0.0;
-
-        if (tryParseNumber(originalCsvData[row][col], value))
-            rawValues.push_back(value);
-        else
-            rawValues.push_back(missingValue);
-    }
-
-    if (transform == 1) // None
-    {
-        processedSeries = rawValues;
-
-        csvTable.updateContent();
-        csvTable.repaint();
-        seriesGraph.setValues(processedSeries);
-        return;
-    }
-
-    if (transform == 2) // ln
-    {
-        for (double value : rawValues)
-        {
-            if (std::isfinite(value) && value > 0.0)
-                processedSeries.push_back(std::log(value));
-            else
-                processedSeries.push_back(missingValue);
-        }
-    }
-    else if (transform == 3) // Difference
-    {
-        processedSeries.resize(rawValues.size(), missingValue);
-
-        for (int row = 1; row < static_cast<int>(rawValues.size()); ++row)
-        {
-            const double current = rawValues[row];
-            const double previous = rawValues[row - 1];
-
-            if (std::isfinite(current) && std::isfinite(previous))
-                processedSeries[row] = current - previous;
-        }
-    }
-
-    // Display transformed values in the selected table column.
-    for (int row = 0; row < static_cast<int>(processedSeries.size()); ++row)
-    {
-        if (row >= static_cast<int>(csvData.size())
-            || col >= csvData[row].size())
-        {
-            continue;
-        }
-
-        const double value = processedSeries[row];
-
-        if (std::isfinite(value))
-            csvData[row].set(col, juce::String(value, 4));
-        else
-            csvData[row].set(col, "N/A");
-    }
-
-    csvTable.updateContent();
-    csvTable.repaint();
+    if (selectedColumn > 0 && selectedColumn <= columnHeaders.size())
+        seriesGraph.setTitle(columnHeaders[selectedColumn - 1]);
+    else
+        seriesGraph.setTitle({});
 
     seriesGraph.setValues(processedSeries);
+    csvTable.updateContent();
+    csvTable.repaint();
+}
 
+void DataSonifierAudioProcessorEditor::rebuildTableColumns()
+{
+    csvTable.getHeader().removeAllColumns();
 
-
-    int validValueCount = 0;
-
-    for (double value : processedSeries)
+    for (int col = 0; col < columnHeaders.size(); ++col)
     {
-        if (std::isfinite(value))
-            ++validValueCount;
+        csvTable.getHeader().addColumn(
+            columnHeaders[col],
+            col + 1,
+            120,
+            120,
+            120,
+            juce::TableHeaderComponent::notSortable);
     }
+}
 
-    selectedCellLabel.setText(
-        "Processed values: " + juce::String(validValueCount),
-        juce::dontSendNotification);
-    
+void DataSonifierAudioProcessorEditor::rebuildSeriesSelector()
+{
+    seriesSelector.clear(juce::dontSendNotification);
+
+    for (int col = 0; col < columnHeaders.size(); ++col)
+        seriesSelector.addItem(columnHeaders[col], col + 1);
 }
 
 void DataSonifierAudioProcessorEditor::mouseDown(
@@ -447,17 +311,10 @@ void DataSonifierAudioProcessorEditor::mouseDown(
         return;
 
     selectedRow = -1;
-    selectedColumn = columnId;
     selectedHeaderColumn = columnId;
 
-    // Synchronise the selector without running its onChange callback.
-    seriesSelector.setSelectedId(
-        columnId,
-        juce::dontSendNotification);
-
-    // Recalculate the selected series and update the graph/table.
-    updateProcessedSeries();
-    audioProcessor.setProcessedSeries(processedSeries);
+    audioProcessor.setSelectedColumn(columnId);
+    refreshFromProcessor();
 
     const int col = columnId - 1;
 

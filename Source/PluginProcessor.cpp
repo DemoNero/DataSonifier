@@ -13,6 +13,23 @@
 #include <limits>
 #include <memory>
 
+namespace
+{
+bool tryParseNumber(const juce::String& input, double& result)
+{
+    const auto text = input.trim();
+
+    if (text.isEmpty() || !text.containsAnyOf("0123456789"))
+        return false;
+
+    if (text.retainCharacters("0123456789+-.eE") != text)
+        return false;
+
+    result = text.getDoubleValue();
+    return std::isfinite(result);
+}
+}
+
 //==============================================================================
 DataSonifierAudioProcessor::DataSonifierAudioProcessor()
 #ifndef JucePlugin_PreferredChannelConfigurations
@@ -24,6 +41,9 @@ DataSonifierAudioProcessor::DataSonifierAudioProcessor()
                        .withOutput ("Output", juce::AudioChannelSet::stereo(), true)
                      #endif
                        )
+     , parameterState(*this, nullptr, "PARAMETERS", createParameterLayout())
+#else
+     : parameterState(*this, nullptr, "PARAMETERS", createParameterLayout())
 #endif
 {
 }
@@ -264,7 +284,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
             // Move to the next data value based on playback speed.
             const double notesPerSecond =
-                playbackSpeed.load();
+                parameterState.getRawParameterValue("speed")->load();
 
             samplesUntilNextNote =
                 static_cast<int>(
@@ -293,15 +313,17 @@ juce::AudioProcessorEditor* DataSonifierAudioProcessor::createEditor()
 //==============================================================================
 void DataSonifierAudioProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
-    // You should use this method to store your parameters in the memory block.
-    // You could do that either as raw data, or use the XML or ValueTree classes
-    // as intermediaries to make it easy to save and load complex data.
+    if (auto xml = parameterState.copyState().createXml())
+        copyXmlToBinary(*xml, destData);
 }
 
 void DataSonifierAudioProcessor::setStateInformation (const void* data, int sizeInBytes)
 {
-    // You should use this method to restore your parameters from this memory block,
-    // whose contents will have been created by the getStateInformation() call.
+    if (auto xml = getXmlFromBinary(data, sizeInBytes))
+    {
+        if (xml->hasTagName(parameterState.state.getType()))
+            parameterState.replaceState(juce::ValueTree::fromXml(*xml));
+    }
 }
 
 //==============================================================================
@@ -311,7 +333,157 @@ juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter()
     return new DataSonifierAudioProcessor();
 }
 
-void DataSonifierAudioProcessor::setProcessedSeries(
+bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
+{
+    if (!file.existsAsFile())
+        return false;
+
+    juce::StringArray lines;
+    lines.addLines(file.loadFileAsString());
+
+    std::vector<juce::StringArray> parsedRows;
+    parsedRows.reserve(static_cast<size_t>(lines.size()));
+
+    for (const auto& line : lines)
+    {
+        juce::StringArray cells;
+        cells.addTokens(line, ",", "\"");
+        cells.trim();
+        parsedRows.push_back(std::move(cells));
+    }
+
+    if (parsedRows.empty() || parsedRows.front().isEmpty())
+        return false;
+
+    std::vector<double> seriesForMidi;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+
+        columnHeaders = parsedRows.front();
+        parsedRows.erase(parsedRows.begin());
+        originalCsvData = std::move(parsedRows);
+        loadedFilePath = file.getFullPathName();
+        selectedColumn = columnHeaders.isEmpty() ? -1 : 1;
+        selectedTransform = 1;
+
+        rebuildProcessedSeries();
+        seriesForMidi = processedSeries;
+    }
+
+    rebuildMidiNoteSeries(seriesForMidi);
+    return true;
+}
+
+void DataSonifierAudioProcessor::setSelectedColumn(int columnId)
+{
+    std::vector<double> seriesForMidi;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+        selectedColumn = juce::isPositiveAndBelow(columnId - 1, columnHeaders.size())
+            ? columnId
+            : -1;
+        rebuildProcessedSeries();
+        seriesForMidi = processedSeries;
+    }
+
+    rebuildMidiNoteSeries(seriesForMidi);
+}
+
+void DataSonifierAudioProcessor::setSelectedTransform(int transformId)
+{
+    std::vector<double> seriesForMidi;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+        selectedTransform = juce::jlimit(1, 3, transformId);
+        rebuildProcessedSeries();
+        seriesForMidi = processedSeries;
+    }
+
+    rebuildMidiNoteSeries(seriesForMidi);
+}
+
+DataSonifierAudioProcessor::DataStateSnapshot
+DataSonifierAudioProcessor::getDataStateSnapshot() const
+{
+    const juce::ScopedLock lock(dataStateLock);
+
+    return {
+        displayCsvData,
+        columnHeaders,
+        processedSeries,
+        loadedFilePath,
+        selectedColumn,
+        selectedTransform
+    };
+}
+
+void DataSonifierAudioProcessor::rebuildProcessedSeries()
+{
+    displayCsvData = originalCsvData;
+    processedSeries.clear();
+
+    if (selectedColumn <= 0 || originalCsvData.empty())
+        return;
+
+    const int col = selectedColumn - 1;
+    const double missingValue = std::numeric_limits<double>::quiet_NaN();
+
+    std::vector<double> rawValues;
+    rawValues.reserve(originalCsvData.size());
+
+    for (const auto& row : originalCsvData)
+    {
+        if (col >= row.size())
+        {
+            rawValues.push_back(missingValue);
+            continue;
+        }
+
+        double value = 0.0;
+        rawValues.push_back(tryParseNumber(row[col], value) ? value : missingValue);
+    }
+
+    if (selectedTransform == 1)
+    {
+        processedSeries = rawValues;
+        return;
+    }
+
+    if (selectedTransform == 2)
+    {
+        processedSeries.reserve(rawValues.size());
+
+        for (const double value : rawValues)
+            processedSeries.push_back(std::isfinite(value) && value > 0.0
+                ? std::log(value)
+                : missingValue);
+    }
+    else
+    {
+        processedSeries.resize(rawValues.size(), missingValue);
+
+        for (size_t row = 1; row < rawValues.size(); ++row)
+        {
+            if (std::isfinite(rawValues[row]) && std::isfinite(rawValues[row - 1]))
+                processedSeries[row] = rawValues[row] - rawValues[row - 1];
+        }
+    }
+
+    for (size_t row = 0; row < processedSeries.size(); ++row)
+    {
+        if (row >= displayCsvData.size() || col >= displayCsvData[row].size())
+            continue;
+
+        const auto value = processedSeries[row];
+        displayCsvData[row].set(col,
+            std::isfinite(value) ? juce::String(value, 4) : juce::String("N/A"));
+    }
+}
+
+void DataSonifierAudioProcessor::rebuildMidiNoteSeries(
     const std::vector<double>& series)
 {
     constexpr int lowestMidiNote = 48;  // C3
@@ -375,9 +547,28 @@ void DataSonifierAudioProcessor::setProcessedSeries(
         << " values to MIDI notes");
 }
 
-void DataSonifierAudioProcessor::setPlaybackSpeed(
-    double notesPerSecond)
+juce::AudioProcessorValueTreeState&
+DataSonifierAudioProcessor::getParameterState() noexcept
 {
-    playbackSpeed.store(
-        juce::jlimit(0.25, 8.0, notesPerSecond));
+    return parameterState;
+}
+
+juce::AudioProcessorValueTreeState::ParameterLayout
+DataSonifierAudioProcessor::createParameterLayout()
+{
+    juce::AudioProcessorValueTreeState::ParameterLayout layout;
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "speed", 1 },
+        "Speed",
+        juce::NormalisableRange<float>{ 0.25f, 8.0f, 0.25f },
+        1.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("notes/s")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 2) + " notes/s";
+            })));
+
+    return layout;
 }

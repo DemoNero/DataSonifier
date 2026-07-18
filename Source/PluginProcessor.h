@@ -16,6 +16,16 @@
 class DataSonifierAudioProcessor  : public juce::AudioProcessor
 {
 public:
+    struct DataStateSnapshot
+    {
+        std::vector<juce::StringArray> displayData;
+        juce::StringArray columnHeaders;
+        std::vector<double> processedSeries;
+        juce::String loadedFilePath;
+        int selectedColumn = -1;
+        int selectedTransform = 1;
+    };
+
     //==============================================================================
     DataSonifierAudioProcessor();
     ~DataSonifierAudioProcessor() override;
@@ -53,12 +63,30 @@ public:
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
 
-    void setProcessedSeries(const std::vector<double>& series);
+    bool loadCsvFile(const juce::File& file);
+    void setSelectedColumn(int columnId);
+    void setSelectedTransform(int transformId);
+    DataStateSnapshot getDataStateSnapshot() const;
 
-    void setPlaybackSpeed(double notesPerSecond);
+    juce::AudioProcessorValueTreeState& getParameterState() noexcept;
 
 private:
     //==============================================================================
+    void rebuildProcessedSeries();
+    void rebuildMidiNoteSeries(const std::vector<double>& series);
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
+
+    juce::AudioProcessorValueTreeState parameterState;
+
+    mutable juce::CriticalSection dataStateLock;
+    std::vector<juce::StringArray> originalCsvData;
+    std::vector<juce::StringArray> displayCsvData;
+    juce::StringArray columnHeaders;
+    std::vector<double> processedSeries;
+    juce::String loadedFilePath;
+    int selectedColumn = -1;
+    int selectedTransform = 1;
+
     std::shared_ptr<const std::vector<int>> midiNoteSeries;
 
     size_t currentSeriesIndex = 0;
@@ -72,7 +100,5 @@ private:
 
     bool wasTransportPlaying = false;
 
-    std::atomic<double> playbackSpeed{ 1.0 };
-    
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DataSonifierAudioProcessor)
 };

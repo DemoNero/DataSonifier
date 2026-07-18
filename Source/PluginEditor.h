@@ -216,7 +216,9 @@ public:
 
     void cellClicked(int rowNumber, int columnId, const juce::MouseEvent&) override;
 
-    void updateProcessedSeries();
+    void refreshFromProcessor();
+    void rebuildTableColumns();
+    void rebuildSeriesSelector();
 
     void mouseDown(const juce::MouseEvent& event) override;
 
@@ -229,7 +231,6 @@ private:
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     std::vector<juce::StringArray> csvData;
-    std::vector<juce::StringArray> originalCsvData;
 
     juce::TableListBox csvTable;
     juce::ComboBox seriesSelector;
@@ -242,6 +243,8 @@ private:
 
     juce::Slider playbackSpeedSlider;
     juce::Label playbackSpeedLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        playbackSpeedAttachment;
 
     std::vector<double> processedSeries;
 
