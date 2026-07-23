@@ -22,6 +22,10 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(csvTable);
     addAndMakeVisible(playbackSpeedLabel);
     addAndMakeVisible(playbackSpeedSlider);
+    addAndMakeVisible(timingModeLabel);
+    addAndMakeVisible(timingModeSelector);
+    addAndMakeVisible(subdivisionLabel);
+    addAndMakeVisible(subdivisionSelector);
 
     seriesSelector.setTextWhenNothingSelected("Select series");
 
@@ -118,6 +122,25 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "speed",
             playbackSpeedSlider);
 
+    timingModeLabel.setText("Timing", juce::dontSendNotification);
+    timingModeSelector.addItemList({ "Free", "Sync" }, 1);
+    timingModeAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(),
+            "timingMode",
+            timingModeSelector);
+
+    subdivisionLabel.setText("Division", juce::dontSendNotification);
+    subdivisionSelector.addItemList(
+        { "1/1", "1/2", "1/4", "1/8", "1/16",
+          "1/4T", "1/8T", "1/16T" },
+        1);
+    subdivisionAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(),
+            "subdivision",
+            subdivisionSelector);
+
     setSize(700, 650);
     refreshFromProcessor();
 }
@@ -140,29 +163,26 @@ void DataSonifierAudioProcessorEditor::resized()
     seriesSelector.setBounds(20, 60, 220, 30);
     transformSelector.setBounds(260, 60, 150, 30);
 
-    playbackSpeedLabel.setBounds(
-        430,
-        60,
-        55,
-        30);
+    timingModeLabel.setBounds(20, 100, 50, 30);
+    timingModeSelector.setBounds(70, 100, 100, 30);
 
-    playbackSpeedSlider.setBounds(
-        485,
-        60,
-        getWidth() - 505,
-        30);
+    subdivisionLabel.setBounds(190, 100, 60, 30);
+    subdivisionSelector.setBounds(250, 100, 100, 30);
+
+    playbackSpeedLabel.setBounds(370, 100, 55, 30);
+    playbackSpeedSlider.setBounds(425, 100, getWidth() - 445, 30);
 
     csvTable.setBounds(
         20,
-        100,
+        140,
         getWidth() - 40,
-        250);
+        220);
 
     selectedCellLabel.setBounds(
         20,
-        360,
+        370,
         getWidth() - 40,
-        40);
+        30);
 
     seriesGraph.setBounds(
         20,

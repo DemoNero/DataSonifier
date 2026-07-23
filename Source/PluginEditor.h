@@ -246,6 +246,16 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         playbackSpeedAttachment;
 
+    juce::ComboBox timingModeSelector;
+    juce::Label timingModeLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        timingModeAttachment;
+
+    juce::ComboBox subdivisionSelector;
+    juce::Label subdivisionLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        subdivisionAttachment;
+
     std::vector<double> processedSeries;
 
     juce::StringArray columnHeaders;

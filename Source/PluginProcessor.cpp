@@ -191,11 +191,17 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     }
 
     bool transportIsPlaying = false;
+    double hostBpm = 120.0;
 
     if (auto* playHead = getPlayHead())
     {
         if (auto position = playHead->getPosition())
+        {
             transportIsPlaying = position->getIsPlaying();
+
+            if (const auto bpm = position->getBpm())
+                hostBpm = *bpm;
+        }
     }
 
     // Ableton has just been stopped.
@@ -204,15 +210,9 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         // Prevent any incoming MIDI events from passing through.
         midiMessages.clear();
 
-        // Send a note-off once if a note was active when Stop was pressed.
-        if (wasTransportPlaying && currentlyPlayingNote >= 0)
-        {
-            midiMessages.addEvent(
-                juce::MidiMessage::noteOff(
-                    1,
-                    currentlyPlayingNote),
-                0);
-        }
+        // Ensure no note can remain held when playback stops.
+        if (wasTransportPlaying)
+            midiMessages.addEvent(juce::MidiMessage::allNotesOff(1), 0);
 
         // Reset playback so the next Play starts from the first CSV value.
         currentSeriesIndex = 0;
@@ -245,12 +245,66 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
             samplesUntilNoteOff = -1;
         }
 
-        // Start a new C4 note.
-        // Move to the next value once per second.
+        // Move to the next value at the selected Free or Sync rate.
         if (samplesUntilNextNote == 0)
         {
             constexpr int midiChannel = 1;
             constexpr float velocity = 0.8f;
+
+            const int timingMode = static_cast<int>(
+                parameterState.getRawParameterValue("timingMode")->load());
+
+            double intervalSeconds = 1.0;
+
+            if (timingMode == 0) // Free: rate is measured in Hz.
+            {
+                const double notesPerSecond =
+                    parameterState.getRawParameterValue("speed")->load();
+
+                intervalSeconds = 1.0 / notesPerSecond;
+            }
+            else // Sync: rate follows Ableton's tempo and note division.
+            {
+                const int subdivision = juce::jlimit(
+                    0,
+                    7,
+                    static_cast<int>(parameterState
+                        .getRawParameterValue("subdivision")->load()));
+
+                constexpr double quarterNoteLengths[] = {
+                    4.0,       // 1/1
+                    2.0,       // 1/2
+                    1.0,       // 1/4
+                    0.5,       // 1/8
+                    0.25,      // 1/16
+                    2.0 / 3.0, // 1/4 triplet
+                    1.0 / 3.0, // 1/8 triplet
+                    1.0 / 6.0  // 1/16 triplet
+                };
+
+                const double secondsPerQuarterNote =
+                    60.0 / juce::jmax(1.0, hostBpm);
+
+                intervalSeconds = secondsPerQuarterNote
+                    * quarterNoteLengths[subdivision];
+            }
+
+            samplesUntilNextNote = juce::jmax(
+                1,
+                static_cast<int>(currentSampleRate * intervalSeconds));
+
+            // Safety: finish the previous note before starting another one.
+            if (currentlyPlayingNote >= 0)
+            {
+                midiMessages.addEvent(
+                    juce::MidiMessage::noteOff(
+                        midiChannel,
+                        currentlyPlayingNote),
+                    sample);
+
+                currentlyPlayingNote = -1;
+                samplesUntilNoteOff = -1;
+            }
 
             if (notes != nullptr && !notes->empty())
             {
@@ -272,8 +326,16 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                     currentlyPlayingNote = noteNumber;
 
-                    samplesUntilNoteOff =
+                    // Keep notes shorter than their interval so high rates
+                    // cannot create overlapping or permanently held notes.
+                    const int maximumNoteLength =
                         static_cast<int>(currentSampleRate * 0.2);
+
+                    samplesUntilNoteOff = juce::jmax(
+                        1,
+                        juce::jmin(
+                            maximumNoteLength,
+                            static_cast<int>(samplesUntilNextNote * 0.8)));
                 }
 
                 ++currentSeriesIndex;
@@ -282,13 +344,6 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     currentSeriesIndex = 0;
             }
 
-            // Move to the next data value based on playback speed.
-            const double notesPerSecond =
-                parameterState.getRawParameterValue("speed")->load();
-
-            samplesUntilNextNote =
-                static_cast<int>(
-                    currentSampleRate / notesPerSecond);
         }
 
         if (samplesUntilNextNote > 0)
@@ -564,11 +619,26 @@ DataSonifierAudioProcessor::createParameterLayout()
         juce::NormalisableRange<float>{ 0.25f, 8.0f, 0.25f },
         1.0f,
         juce::AudioParameterFloatAttributes{}
-            .withLabel("notes/s")
-            .withStringFromValueFunction([](float value, int)
+        .withLabel("notes/s")
+        .withStringFromValueFunction([](float value, int)
             {
-                return juce::String(value, 2) + " notes/s";
+                return juce::String(value, 2);
             })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "timingMode", 1 },
+        "Timing Mode",
+        juce::StringArray{ "Free", "Sync" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "subdivision", 1 },
+        "Subdivision",
+        juce::StringArray{
+            "1/1", "1/2", "1/4", "1/8", "1/16",
+            "1/4T", "1/8T", "1/16T"
+        },
+        2));
 
     return layout;
 }
