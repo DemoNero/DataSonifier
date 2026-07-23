@@ -69,6 +69,7 @@ public:
     DataStateSnapshot getDataStateSnapshot() const;
 
     juce::AudioProcessorValueTreeState& getParameterState() noexcept;
+    int getCurrentPlaybackIndex() const noexcept;
 
 private:
     //==============================================================================
@@ -90,6 +91,7 @@ private:
     std::shared_ptr<const std::vector<int>> midiNoteSeries;
 
     size_t currentSeriesIndex = 0;
+    std::atomic<int> currentPlaybackIndex{ -1 };
 
     double currentSampleRate = 44100.0;
 

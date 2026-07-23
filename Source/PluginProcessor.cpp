@@ -127,6 +127,7 @@ void DataSonifierAudioProcessor::prepareToPlay(
     samplesUntilNoteOff = -1;
     currentlyPlayingNote = -1;
     currentSeriesIndex = 0;
+    currentPlaybackIndex.store(-1);
     wasTransportPlaying = false;
 }
 
@@ -219,6 +220,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         samplesUntilNextNote = 0;
         samplesUntilNoteOff = -1;
         currentlyPlayingNote = -1;
+        currentPlaybackIndex.store(-1);
         wasTransportPlaying = false;
 
         return;
@@ -242,6 +244,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 sample);
 
             currentlyPlayingNote = -1;
+            currentPlaybackIndex.store(-1);
             samplesUntilNoteOff = -1;
         }
 
@@ -303,6 +306,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                     sample);
 
                 currentlyPlayingNote = -1;
+                currentPlaybackIndex.store(-1);
                 samplesUntilNoteOff = -1;
             }
 
@@ -313,6 +317,8 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                 const int noteNumber =
                     (*notes)[currentSeriesIndex];
+
+                currentPlaybackIndex.store(-1);
 
                 // -1 represents an invalid/missing value, so play a rest.
                 if (noteNumber >= 0)
@@ -325,6 +331,8 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         sample);
 
                     currentlyPlayingNote = noteNumber;
+                    currentPlaybackIndex.store(
+                        static_cast<int>(currentSeriesIndex));
 
                     // Keep notes shorter than their interval so high rates
                     // cannot create overlapping or permanently held notes.
@@ -606,6 +614,11 @@ juce::AudioProcessorValueTreeState&
 DataSonifierAudioProcessor::getParameterState() noexcept
 {
     return parameterState;
+}
+
+int DataSonifierAudioProcessor::getCurrentPlaybackIndex() const noexcept
+{
+    return currentPlaybackIndex.load();
 }
 
 juce::AudioProcessorValueTreeState::ParameterLayout

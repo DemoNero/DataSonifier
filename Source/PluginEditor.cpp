@@ -143,10 +143,12 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
 
     setSize(700, 650);
     refreshFromProcessor();
+    startTimerHz(30);
 }
 
 DataSonifierAudioProcessorEditor::~DataSonifierAudioProcessorEditor()
 {
+    stopTimer();
     csvTable.getHeader().removeMouseListener(this);
 }
 
@@ -346,4 +348,10 @@ void DataSonifierAudioProcessorEditor::mouseDown(
     }
 
     csvTable.repaint();
+}
+
+void DataSonifierAudioProcessorEditor::timerCallback()
+{
+    seriesGraph.setPlaybackIndex(
+        audioProcessor.getCurrentPlaybackIndex());
 }

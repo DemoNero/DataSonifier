@@ -33,6 +33,15 @@ public:
         repaint();
     }
 
+    void setPlaybackIndex(int newIndex)
+    {
+        if (playbackIndex == newIndex)
+            return;
+
+        playbackIndex = newIndex;
+        repaint();
+    }
+
     void paint(juce::Graphics& g) override
     {
         auto bounds = getLocalBounds().toFloat().reduced(10.0f);
@@ -165,6 +174,38 @@ public:
             juce::PathStrokeType::curved,
             juce::PathStrokeType::rounded));
 
+        if (juce::isPositiveAndBelow(
+                playbackIndex,
+                static_cast<int>(values.size())))
+        {
+            const double playbackValue = values[playbackIndex];
+
+            if (std::isfinite(playbackValue))
+            {
+                const float markerX = juce::jmap(
+                    static_cast<float>(playbackIndex),
+                    0.0f,
+                    static_cast<float>(values.size() - 1),
+                    bounds.getX(),
+                    bounds.getRight());
+
+                const float markerY = juce::jmap(
+                    static_cast<float>(playbackValue),
+                    static_cast<float>(minimum),
+                    static_cast<float>(maximum),
+                    bounds.getBottom(),
+                    bounds.getY());
+
+                constexpr float markerDiameter = 12.0f;
+                g.setColour(juce::Colours::red);
+                g.fillEllipse(
+                    markerX - markerDiameter * 0.5f,
+                    markerY - markerDiameter * 0.5f,
+                    markerDiameter,
+                    markerDiameter);
+            }
+        }
+
         g.setColour(juce::Colours::lightgrey);
 
         auto formatValue = [](double value)
@@ -193,10 +234,12 @@ public:
 private:
     std::vector<double> values;
     juce::String title;
+    int playbackIndex = -1;
 };
 
 class DataSonifierAudioProcessorEditor  : public juce::AudioProcessorEditor, 
-                                            public juce::TableListBoxModel
+                                            public juce::TableListBoxModel,
+                                            private juce::Timer
 {
 public:
     DataSonifierAudioProcessorEditor (DataSonifierAudioProcessor&);
@@ -223,6 +266,8 @@ public:
     void mouseDown(const juce::MouseEvent& event) override;
 
 private:
+    void timerCallback() override;
+
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     DataSonifierAudioProcessor& audioProcessor;
