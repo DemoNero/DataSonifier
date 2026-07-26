@@ -301,6 +301,31 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
         subdivisionAttachment;
 
+    juce::Slider lowestNoteSlider;
+    juce::Label lowestNoteLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        lowestNoteAttachment;
+
+    juce::Slider highestNoteSlider;
+    juce::Label highestNoteLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        highestNoteAttachment;
+
+    juce::ComboBox pitchMappingModeSelector;
+    juce::Label pitchMappingModeLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        pitchMappingModeAttachment;
+
+    juce::Slider centreNoteSlider;
+    juce::Label centreNoteLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        centreNoteAttachment;
+
+    juce::Slider pitchSpreadSlider;
+    juce::Label pitchSpreadLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        pitchSpreadAttachment;
+
     std::vector<double> processedSeries;
 
     juce::StringArray columnHeaders;

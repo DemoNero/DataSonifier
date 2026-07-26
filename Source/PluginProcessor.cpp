@@ -228,7 +228,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
     wasTransportPlaying = true;
 
-    auto notes = std::atomic_load(&midiNoteSeries);
+    auto normalisedValues = std::atomic_load(&normalisedMidiSeries);
 
     const int blockSize = buffer.getNumSamples();
 
@@ -310,19 +310,60 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 samplesUntilNoteOff = -1;
             }
 
-            if (notes != nullptr && !notes->empty())
+            if (normalisedValues != nullptr && !normalisedValues->empty())
             {
                 // Keep the index valid if a new CSV series has a different size.
-                currentSeriesIndex %= notes->size();
+                currentSeriesIndex %= normalisedValues->size();
 
-                const int noteNumber =
-                    (*notes)[currentSeriesIndex];
+                const float normalisedValue =
+                    (*normalisedValues)[currentSeriesIndex];
 
                 currentPlaybackIndex.store(-1);
 
                 // -1 represents an invalid/missing value, so play a rest.
-                if (noteNumber >= 0)
+                if (normalisedValue >= 0.0f)
                 {
+                    const int pitchMappingMode = static_cast<int>(std::round(
+                        parameterState
+                            .getRawParameterValue("pitchMappingMode")->load()));
+
+                    int lowestNote = 0;
+                    int highestNote = 127;
+
+                    if (pitchMappingMode == 0)
+                    {
+                        lowestNote = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("lowestNote")->load()));
+
+                        highestNote = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("highestNote")->load()));
+
+                        if (lowestNote > highestNote)
+                            std::swap(lowestNote, highestNote);
+                    }
+                    else
+                    {
+                        const int centreNote = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("centreNote")->load()));
+
+                        const int spread = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("pitchSpread")->load()));
+
+                        lowestNote = juce::jmax(0, centreNote - spread);
+                        highestNote = juce::jmin(127, centreNote + spread);
+                    }
+
+                    const int noteNumber = juce::jlimit(
+                        0,
+                        127,
+                        static_cast<int>(std::round(
+                            lowestNote
+                            + normalisedValue * (highestNote - lowestNote))));
+
                     midiMessages.addEvent(
                         juce::MidiMessage::noteOn(
                             midiChannel,
@@ -348,7 +389,7 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
 
                 ++currentSeriesIndex;
 
-                if (currentSeriesIndex >= notes->size())
+                if (currentSeriesIndex >= normalisedValues->size())
                     currentSeriesIndex = 0;
             }
 
@@ -434,7 +475,7 @@ bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
         seriesForMidi = processedSeries;
     }
 
-    rebuildMidiNoteSeries(seriesForMidi);
+    rebuildNormalisedMidiSeries(seriesForMidi);
     return true;
 }
 
@@ -451,7 +492,7 @@ void DataSonifierAudioProcessor::setSelectedColumn(int columnId)
         seriesForMidi = processedSeries;
     }
 
-    rebuildMidiNoteSeries(seriesForMidi);
+    rebuildNormalisedMidiSeries(seriesForMidi);
 }
 
 void DataSonifierAudioProcessor::setSelectedTransform(int transformId)
@@ -465,7 +506,7 @@ void DataSonifierAudioProcessor::setSelectedTransform(int transformId)
         seriesForMidi = processedSeries;
     }
 
-    rebuildMidiNoteSeries(seriesForMidi);
+    rebuildNormalisedMidiSeries(seriesForMidi);
 }
 
 DataSonifierAudioProcessor::DataStateSnapshot
@@ -546,12 +587,9 @@ void DataSonifierAudioProcessor::rebuildProcessedSeries()
     }
 }
 
-void DataSonifierAudioProcessor::rebuildMidiNoteSeries(
+void DataSonifierAudioProcessor::rebuildNormalisedMidiSeries(
     const std::vector<double>& series)
 {
-    constexpr int lowestMidiNote = 48;  // C3
-    constexpr int highestMidiNote = 84; // C6
-
     double minimum = std::numeric_limits<double>::infinity();
     double maximum = -std::numeric_limits<double>::infinity();
 
@@ -565,8 +603,8 @@ void DataSonifierAudioProcessor::rebuildMidiNoteSeries(
         maximum = std::max(maximum, value);
     }
 
-    auto mappedNotes = std::make_shared<std::vector<int>>();
-    mappedNotes->reserve(series.size());
+    auto values = std::make_shared<std::vector<float>>();
+    values->reserve(series.size());
 
     const bool hasValidValues =
         std::isfinite(minimum) && std::isfinite(maximum);
@@ -576,38 +614,26 @@ void DataSonifierAudioProcessor::rebuildMidiNoteSeries(
         // Missing values become rests.
         if (!hasValidValues || !std::isfinite(value))
         {
-            mappedNotes->push_back(-1);
+            values->push_back(-1.0f);
             continue;
         }
 
-        int midiNote = 60;
+        float normalisedValue = 0.5f;
 
         if (minimum != maximum)
-        {
-            const double normalised =
-                (value - minimum) / (maximum - minimum);
+            normalisedValue = static_cast<float>(
+                (value - minimum) / (maximum - minimum));
 
-            midiNote = static_cast<int>(std::round(
-                lowestMidiNote
-                + normalised
-                * (highestMidiNote - lowestMidiNote)));
-        }
-
-        midiNote = juce::jlimit(
-            lowestMidiNote,
-            highestMidiNote,
-            midiNote);
-
-        mappedNotes->push_back(midiNote);
+        values->push_back(juce::jlimit(0.0f, 1.0f, normalisedValue));
     }
 
     std::atomic_store(
-        &midiNoteSeries,
-        std::shared_ptr<const std::vector<int>>(mappedNotes));
+        &normalisedMidiSeries,
+        std::shared_ptr<const std::vector<float>>(values));
 
-    DBG("Mapped "
-        << mappedNotes->size()
-        << " values to MIDI notes");
+    DBG("Normalised "
+        << values->size()
+        << " values for MIDI mapping");
 }
 
 juce::AudioProcessorValueTreeState&
@@ -652,6 +678,61 @@ DataSonifierAudioProcessor::createParameterLayout()
             "1/4T", "1/8T", "1/16T"
         },
         2));
+
+    const auto midiNoteToText = [](int note, int)
+    {
+        return juce::MidiMessage::getMidiNoteName(
+            note,
+            true,
+            true,
+            4);
+    };
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "lowestNote", 1 },
+        "Lowest Note",
+        0,
+        127,
+        48,
+        juce::AudioParameterIntAttributes{}
+            .withStringFromValueFunction(midiNoteToText)));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "highestNote", 1 },
+        "Highest Note",
+        0,
+        127,
+        84,
+        juce::AudioParameterIntAttributes{}
+            .withStringFromValueFunction(midiNoteToText)));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "pitchMappingMode", 1 },
+        "Pitch Mapping Mode",
+        juce::StringArray{ "Bounds", "Centre + Spread" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "centreNote", 1 },
+        "Centre Note",
+        0,
+        127,
+        60,
+        juce::AudioParameterIntAttributes{}
+            .withStringFromValueFunction(midiNoteToText)));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "pitchSpread", 1 },
+        "Pitch Spread",
+        0,
+        64,
+        12,
+        juce::AudioParameterIntAttributes{}
+            .withLabel("st")
+            .withStringFromValueFunction([](int value, int)
+            {
+                return juce::String(value);
+            })));
 
     return layout;
 }

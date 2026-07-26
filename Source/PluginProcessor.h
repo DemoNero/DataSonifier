@@ -74,7 +74,7 @@ public:
 private:
     //==============================================================================
     void rebuildProcessedSeries();
-    void rebuildMidiNoteSeries(const std::vector<double>& series);
+    void rebuildNormalisedMidiSeries(const std::vector<double>& series);
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     juce::AudioProcessorValueTreeState parameterState;
@@ -88,7 +88,7 @@ private:
     int selectedColumn = -1;
     int selectedTransform = 1;
 
-    std::shared_ptr<const std::vector<int>> midiNoteSeries;
+    std::shared_ptr<const std::vector<float>> normalisedMidiSeries;
 
     size_t currentSeriesIndex = 0;
     std::atomic<int> currentPlaybackIndex{ -1 };

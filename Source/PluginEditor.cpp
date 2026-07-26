@@ -26,6 +26,16 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(timingModeSelector);
     addAndMakeVisible(subdivisionLabel);
     addAndMakeVisible(subdivisionSelector);
+    addAndMakeVisible(lowestNoteLabel);
+    addAndMakeVisible(lowestNoteSlider);
+    addAndMakeVisible(highestNoteLabel);
+    addAndMakeVisible(highestNoteSlider);
+    addAndMakeVisible(pitchMappingModeLabel);
+    addAndMakeVisible(pitchMappingModeSelector);
+    addAndMakeVisible(centreNoteLabel);
+    addAndMakeVisible(centreNoteSlider);
+    addAndMakeVisible(pitchSpreadLabel);
+    addAndMakeVisible(pitchSpreadSlider);
 
     seriesSelector.setTextWhenNothingSelected("Select series");
 
@@ -141,7 +151,67 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "subdivision",
             subdivisionSelector);
 
-    setSize(700, 650);
+    const auto configureNoteSlider = [](juce::Slider& slider)
+    {
+        slider.setSliderStyle(juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle(
+            juce::Slider::TextBoxRight,
+            false,
+            60,
+            25);
+        slider.setRange(0.0, 127.0, 1.0);
+    };
+
+    lowestNoteLabel.setText("Lowest Note", juce::dontSendNotification);
+    configureNoteSlider(lowestNoteSlider);
+    lowestNoteAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "lowestNote",
+            lowestNoteSlider);
+
+    highestNoteLabel.setText("Highest Note", juce::dontSendNotification);
+    configureNoteSlider(highestNoteSlider);
+    highestNoteAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "highestNote",
+            highestNoteSlider);
+
+    pitchMappingModeLabel.setText("Pitch Mode", juce::dontSendNotification);
+    pitchMappingModeSelector.addItemList(
+        { "Bounds", "Centre + Spread" },
+        1);
+    pitchMappingModeAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(),
+            "pitchMappingMode",
+            pitchMappingModeSelector);
+
+    centreNoteLabel.setText("Centre", juce::dontSendNotification);
+    configureNoteSlider(centreNoteSlider);
+    centreNoteAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "centreNote",
+            centreNoteSlider);
+
+    pitchSpreadLabel.setText("Spread", juce::dontSendNotification);
+    pitchSpreadSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    pitchSpreadSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight,
+        false,
+        70,
+        25);
+    pitchSpreadSlider.setRange(0.0, 64.0, 1.0);
+    pitchSpreadSlider.setTextValueSuffix(" st");
+    pitchSpreadAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "pitchSpread",
+            pitchSpreadSlider);
+
+    setSize(700, 740);
     refreshFromProcessor();
     startTimerHz(30);
 }
@@ -174,23 +244,38 @@ void DataSonifierAudioProcessorEditor::resized()
     playbackSpeedLabel.setBounds(370, 100, 55, 30);
     playbackSpeedSlider.setBounds(425, 100, getWidth() - 445, 30);
 
+    pitchMappingModeLabel.setBounds(20, 140, 75, 30);
+    pitchMappingModeSelector.setBounds(95, 140, 140, 30);
+
+    lowestNoteLabel.setBounds(255, 140, 55, 30);
+    lowestNoteSlider.setBounds(310, 140, 165, 30);
+
+    highestNoteLabel.setBounds(490, 140, 60, 30);
+    highestNoteSlider.setBounds(550, 140, getWidth() - 570, 30);
+
+    centreNoteLabel.setBounds(20, 180, 50, 30);
+    centreNoteSlider.setBounds(70, 180, 255, 30);
+
+    pitchSpreadLabel.setBounds(350, 180, 50, 30);
+    pitchSpreadSlider.setBounds(400, 180, getWidth() - 420, 30);
+
     csvTable.setBounds(
         20,
-        140,
+        220,
         getWidth() - 40,
         220);
 
     selectedCellLabel.setBounds(
         20,
-        370,
+        450,
         getWidth() - 40,
         30);
 
     seriesGraph.setBounds(
         20,
-        410,
+        490,
         getWidth() - 40,
-        getHeight() - 430);
+        getHeight() - 510);
 }
 
 int DataSonifierAudioProcessorEditor::getNumRows()
@@ -354,4 +439,14 @@ void DataSonifierAudioProcessorEditor::timerCallback()
 {
     seriesGraph.setPlaybackIndex(
         audioProcessor.getCurrentPlaybackIndex());
+
+    const int pitchMode = static_cast<int>(std::round(
+        audioProcessor.getParameterState()
+            .getRawParameterValue("pitchMappingMode")->load()));
+
+    const bool usingBounds = pitchMode == 0;
+    lowestNoteSlider.setEnabled(usingBounds);
+    highestNoteSlider.setEnabled(usingBounds);
+    centreNoteSlider.setEnabled(!usingBounds);
+    pitchSpreadSlider.setEnabled(!usingBounds);
 }
