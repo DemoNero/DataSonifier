@@ -323,6 +323,12 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                 // -1 represents an invalid/missing value, so play a rest.
                 if (normalisedValue >= 0.0f)
                 {
+                    const int outputMode = static_cast<int>(std::round(
+                        parameterState
+                            .getRawParameterValue("outputMode")->load()));
+
+                    if (outputMode == 0) // Note output
+                    {
                     const int pitchMappingMode = static_cast<int>(std::round(
                         parameterState
                             .getRawParameterValue("pitchMappingMode")->load()));
@@ -385,6 +391,44 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
                         juce::jmin(
                             maximumNoteLength,
                             static_cast<int>(samplesUntilNextNote * 0.8)));
+                    }
+                    else // MIDI controller output
+                    {
+                        const int controllerNumber = juce::jlimit(
+                            0,
+                            127,
+                            static_cast<int>(std::round(parameterState
+                                .getRawParameterValue("controllerNumber")->load())));
+
+                        int controllerMinimum = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("controllerMinimum")->load()));
+
+                        int controllerMaximum = static_cast<int>(std::round(
+                            parameterState
+                                .getRawParameterValue("controllerMaximum")->load()));
+
+                        if (controllerMinimum > controllerMaximum)
+                            std::swap(controllerMinimum, controllerMaximum);
+
+                        const int controllerValue = juce::jlimit(
+                            0,
+                            127,
+                            static_cast<int>(std::round(
+                                controllerMinimum
+                                + normalisedValue
+                                    * (controllerMaximum - controllerMinimum))));
+
+                        midiMessages.addEvent(
+                            juce::MidiMessage::controllerEvent(
+                                midiChannel,
+                                controllerNumber,
+                                controllerValue),
+                            sample);
+
+                        currentPlaybackIndex.store(
+                            static_cast<int>(currentSeriesIndex));
+                    }
                 }
 
                 ++currentSeriesIndex;
@@ -688,6 +732,56 @@ DataSonifierAudioProcessor::createParameterLayout()
             4);
     };
 
+    const auto midiNoteFromText = [](const juce::String& input)
+    {
+        auto text = input.trim().removeCharacters(" ").toUpperCase();
+
+        if (text.containsOnly("0123456789"))
+            return juce::jlimit(0, 127, text.getIntValue());
+
+        if (text.length() < 2 || !juce::String("ABCDEFG").containsChar(text[0]))
+            return 60;
+
+        int semitone = 0;
+
+        switch (text[0])
+        {
+            case 'C': semitone = 0;  break;
+            case 'D': semitone = 2;  break;
+            case 'E': semitone = 4;  break;
+            case 'F': semitone = 5;  break;
+            case 'G': semitone = 7;  break;
+            case 'A': semitone = 9;  break;
+            case 'B': semitone = 11; break;
+            default: return 60;
+        }
+
+        int octaveStart = 1;
+
+        if (text.length() > 1 && text[1] == '#')
+        {
+            ++semitone;
+            ++octaveStart;
+        }
+        else if (text.length() > 1 && text[1] == 'B')
+        {
+            --semitone;
+            ++octaveStart;
+        }
+
+        const auto octaveText = text.substring(octaveStart);
+        const bool validOctave = octaveText.isNotEmpty()
+            && (octaveText.containsOnly("0123456789")
+                || (octaveText.startsWithChar('-')
+                    && octaveText.substring(1).containsOnly("0123456789")));
+
+        if (!validOctave)
+            return 60;
+
+        const int midiNote = (octaveText.getIntValue() + 1) * 12 + semitone;
+        return juce::jlimit(0, 127, midiNote);
+    };
+
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "lowestNote", 1 },
         "Lowest Note",
@@ -695,7 +789,8 @@ DataSonifierAudioProcessor::createParameterLayout()
         127,
         48,
         juce::AudioParameterIntAttributes{}
-            .withStringFromValueFunction(midiNoteToText)));
+            .withStringFromValueFunction(midiNoteToText)
+            .withValueFromStringFunction(midiNoteFromText)));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "highestNote", 1 },
@@ -704,7 +799,8 @@ DataSonifierAudioProcessor::createParameterLayout()
         127,
         84,
         juce::AudioParameterIntAttributes{}
-            .withStringFromValueFunction(midiNoteToText)));
+            .withStringFromValueFunction(midiNoteToText)
+            .withValueFromStringFunction(midiNoteFromText)));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "pitchMappingMode", 1 },
@@ -719,7 +815,8 @@ DataSonifierAudioProcessor::createParameterLayout()
         127,
         60,
         juce::AudioParameterIntAttributes{}
-            .withStringFromValueFunction(midiNoteToText)));
+            .withStringFromValueFunction(midiNoteToText)
+            .withValueFromStringFunction(midiNoteFromText)));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "pitchSpread", 1 },
@@ -733,6 +830,38 @@ DataSonifierAudioProcessor::createParameterLayout()
             {
                 return juce::String(value);
             })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "outputMode", 1 },
+        "Output Mode",
+        juce::StringArray{ "Note", "Controller" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "controllerNumber", 1 },
+        "CC Number",
+        0,
+        127,
+        74,
+        juce::AudioParameterIntAttributes{}
+            .withStringFromValueFunction([](int value, int)
+            {
+                return "CC " + juce::String(value);
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "controllerMinimum", 1 },
+        "CC Minimum",
+        0,
+        127,
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "controllerMaximum", 1 },
+        "CC Maximum",
+        0,
+        127,
+        127));
 
     return layout;
 }

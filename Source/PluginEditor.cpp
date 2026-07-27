@@ -36,6 +36,14 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(centreNoteSlider);
     addAndMakeVisible(pitchSpreadLabel);
     addAndMakeVisible(pitchSpreadSlider);
+    addAndMakeVisible(outputModeLabel);
+    addAndMakeVisible(outputModeSelector);
+    addAndMakeVisible(controllerNumberLabel);
+    addAndMakeVisible(controllerNumberSlider);
+    addAndMakeVisible(controllerMinimumLabel);
+    addAndMakeVisible(controllerMinimumSlider);
+    addAndMakeVisible(controllerMaximumLabel);
+    addAndMakeVisible(controllerMaximumSlider);
 
     seriesSelector.setTextWhenNothingSelected("Select series");
 
@@ -45,6 +53,14 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     transformSelector.addItem("None", 1);
     transformSelector.addItem("ln", 2);
     transformSelector.addItem("Difference", 3);
+
+    outputModeLabel.setText("Output", juce::dontSendNotification);
+    outputModeSelector.addItemList({ "Note", "Controller" }, 1);
+    outputModeAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(),
+            "outputMode",
+            outputModeSelector);
 
     csvTable.setModel(this);
     csvTable.getHeader().addMouseListener(this, false);
@@ -162,7 +178,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         slider.setRange(0.0, 127.0, 1.0);
     };
 
-    lowestNoteLabel.setText("Lowest Note", juce::dontSendNotification);
+    lowestNoteLabel.setText("Low Note", juce::dontSendNotification);
     configureNoteSlider(lowestNoteSlider);
     lowestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -170,7 +186,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "lowestNote",
             lowestNoteSlider);
 
-    highestNoteLabel.setText("Highest Note", juce::dontSendNotification);
+    highestNoteLabel.setText("High Note", juce::dontSendNotification);
     configureNoteSlider(highestNoteSlider);
     highestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -211,7 +227,42 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "pitchSpread",
             pitchSpreadSlider);
 
-    setSize(700, 740);
+    const auto configureControllerSlider = [](juce::Slider& slider)
+    {
+        slider.setSliderStyle(juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle(
+            juce::Slider::TextBoxRight,
+            false,
+            65,
+            25);
+        slider.setRange(0.0, 127.0, 1.0);
+    };
+
+    controllerNumberLabel.setText("CC Number", juce::dontSendNotification);
+    configureControllerSlider(controllerNumberSlider);
+    controllerNumberAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "controllerNumber",
+            controllerNumberSlider);
+
+    controllerMinimumLabel.setText("CC Min", juce::dontSendNotification);
+    configureControllerSlider(controllerMinimumSlider);
+    controllerMinimumAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "controllerMinimum",
+            controllerMinimumSlider);
+
+    controllerMaximumLabel.setText("CC Max", juce::dontSendNotification);
+    configureControllerSlider(controllerMaximumSlider);
+    controllerMaximumAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(),
+            "controllerMaximum",
+            controllerMaximumSlider);
+
+    setSize(700, 780);
     refreshFromProcessor();
     startTimerHz(30);
 }
@@ -234,6 +285,8 @@ void DataSonifierAudioProcessorEditor::resized()
     openCsvButton.setBounds(20, 20, 150, 30);
     seriesSelector.setBounds(20, 60, 220, 30);
     transformSelector.setBounds(260, 60, 150, 30);
+    outputModeLabel.setBounds(430, 60, 50, 30);
+    outputModeSelector.setBounds(480, 60, getWidth() - 500, 30);
 
     timingModeLabel.setBounds(20, 100, 50, 30);
     timingModeSelector.setBounds(70, 100, 100, 30);
@@ -247,11 +300,11 @@ void DataSonifierAudioProcessorEditor::resized()
     pitchMappingModeLabel.setBounds(20, 140, 75, 30);
     pitchMappingModeSelector.setBounds(95, 140, 140, 30);
 
-    lowestNoteLabel.setBounds(255, 140, 55, 30);
-    lowestNoteSlider.setBounds(310, 140, 165, 30);
+    lowestNoteLabel.setBounds(255, 140, 80, 30);
+    lowestNoteSlider.setBounds(335, 140, 120, 30);
 
-    highestNoteLabel.setBounds(490, 140, 60, 30);
-    highestNoteSlider.setBounds(550, 140, getWidth() - 570, 30);
+    highestNoteLabel.setBounds(480, 140, 80, 30);
+    highestNoteSlider.setBounds(560, 140, 120, 30);
 
     centreNoteLabel.setBounds(20, 180, 50, 30);
     centreNoteSlider.setBounds(70, 180, 255, 30);
@@ -259,23 +312,32 @@ void DataSonifierAudioProcessorEditor::resized()
     pitchSpreadLabel.setBounds(350, 180, 50, 30);
     pitchSpreadSlider.setBounds(400, 180, getWidth() - 420, 30);
 
+    controllerNumberLabel.setBounds(20, 220, 75, 30);
+    controllerNumberSlider.setBounds(95, 220, 140, 30);
+
+    controllerMinimumLabel.setBounds(255, 220, 55, 30);
+    controllerMinimumSlider.setBounds(310, 220, 165, 30);
+
+    controllerMaximumLabel.setBounds(490, 220, 55, 30);
+    controllerMaximumSlider.setBounds(545, 220, getWidth() - 565, 30);
+
     csvTable.setBounds(
         20,
-        220,
+        260,
         getWidth() - 40,
         220);
 
     selectedCellLabel.setBounds(
         20,
-        450,
+        490,
         getWidth() - 40,
         30);
 
     seriesGraph.setBounds(
         20,
-        490,
+        530,
         getWidth() - 40,
-        getHeight() - 510);
+        getHeight() - 550);
 }
 
 int DataSonifierAudioProcessorEditor::getNumRows()
@@ -444,9 +506,22 @@ void DataSonifierAudioProcessorEditor::timerCallback()
         audioProcessor.getParameterState()
             .getRawParameterValue("pitchMappingMode")->load()));
 
-    const bool usingBounds = pitchMode == 0;
+    const int outputMode = static_cast<int>(std::round(
+        audioProcessor.getParameterState()
+            .getRawParameterValue("outputMode")->load()));
+
+    const bool usingNotes = outputMode == 0;
+    const bool usingBounds = usingNotes && pitchMode == 0;
+    const bool usingCentreAndSpread = usingNotes && pitchMode == 1;
+
+    pitchMappingModeSelector.setEnabled(usingNotes);
     lowestNoteSlider.setEnabled(usingBounds);
     highestNoteSlider.setEnabled(usingBounds);
-    centreNoteSlider.setEnabled(!usingBounds);
-    pitchSpreadSlider.setEnabled(!usingBounds);
+    centreNoteSlider.setEnabled(usingCentreAndSpread);
+    pitchSpreadSlider.setEnabled(usingCentreAndSpread);
+
+    const bool usingController = outputMode == 1;
+    controllerNumberSlider.setEnabled(usingController);
+    controllerMinimumSlider.setEnabled(usingController);
+    controllerMaximumSlider.setEnabled(usingController);
 }
