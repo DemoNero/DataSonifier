@@ -14,6 +14,53 @@
 DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifierAudioProcessor& p)
     : AudioProcessorEditor (&p), audioProcessor (p)
 {
+    const auto lcd = juce::Colour(0xff102c2d);
+    const auto lcdRaised = juce::Colour(0xff1d3b3b);
+    const auto mint = juce::Colour(0xff73cdbd);
+    const auto paleText = juce::Colour(0xffdbe8df);
+    const auto shell = juce::Colour(0xffb8c1a8);
+
+    hardwareLookAndFeel.setColour(
+        juce::TextButton::buttonColourId, juce::Colour(0xff435c52));
+    hardwareLookAndFeel.setColour(
+        juce::TextButton::buttonOnColourId, mint.darker(0.2f));
+    hardwareLookAndFeel.setColour(
+        juce::TextButton::textColourOffId, paleText);
+    hardwareLookAndFeel.setColour(
+        juce::ComboBox::backgroundColourId, lcdRaised);
+    hardwareLookAndFeel.setColour(
+        juce::ComboBox::outlineColourId, juce::Colour(0xff6f8b7d));
+    hardwareLookAndFeel.setColour(
+        juce::ComboBox::textColourId, paleText);
+    hardwareLookAndFeel.setColour(
+        juce::ComboBox::arrowColourId, mint);
+    hardwareLookAndFeel.setColour(
+        juce::Label::textColourId, juce::Colour(0xff283b34));
+    hardwareLookAndFeel.setColour(
+        juce::Slider::trackColourId, juce::Colour(0xff40594f));
+    hardwareLookAndFeel.setColour(
+        juce::Slider::thumbColourId, mint);
+    hardwareLookAndFeel.setColour(
+        juce::Slider::textBoxBackgroundColourId, lcdRaised);
+    hardwareLookAndFeel.setColour(
+        juce::Slider::textBoxTextColourId, paleText);
+    hardwareLookAndFeel.setColour(
+        juce::Slider::textBoxOutlineColourId, juce::Colour(0xff6f8b7d));
+    hardwareLookAndFeel.setColour(
+        juce::TableListBox::backgroundColourId, lcd);
+    hardwareLookAndFeel.setColour(
+        juce::TableHeaderComponent::backgroundColourId, juce::Colour(0xff38544d));
+    hardwareLookAndFeel.setColour(
+        juce::TableHeaderComponent::textColourId, paleText);
+    hardwareLookAndFeel.setColour(
+        juce::PopupMenu::backgroundColourId, juce::Colour(0xff203b39));
+    hardwareLookAndFeel.setColour(
+        juce::PopupMenu::textColourId, paleText);
+    hardwareLookAndFeel.setColour(
+        juce::PopupMenu::highlightedBackgroundColourId, mint.darker(0.45f));
+    setLookAndFeel(&hardwareLookAndFeel);
+
+    setColour(juce::ResizableWindow::backgroundColourId, shell);
     addAndMakeVisible(openCsvButton);
     addAndMakeVisible(seriesGraph);
     addAndMakeVisible(seriesSelector);
@@ -49,6 +96,9 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
 
     selectedCellLabel.setText("Selected cell: none", juce::dontSendNotification);
     selectedCellLabel.setJustificationType(juce::Justification::topLeft);
+    selectedCellLabel.setColour(
+        juce::Label::textColourId,
+        juce::Colour(0xffc9ded5));
 
     transformSelector.addItem("None", 1);
     transformSelector.addItem("ln", 2);
@@ -65,6 +115,10 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     csvTable.setModel(this);
     csvTable.getHeader().addMouseListener(this, false);
     csvTable.getHeader().setStretchToFitActive(false);
+    csvTable.setColour(
+        juce::TableListBox::outlineColourId,
+        juce::Colour(0xff6f8b7d));
+    csvTable.setOutlineThickness(1);
 
     openCsvButton.onClick = [this]()
     {
@@ -178,7 +232,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         slider.setRange(0.0, 127.0, 1.0);
     };
 
-    lowestNoteLabel.setText("Low Note", juce::dontSendNotification);
+    lowestNoteLabel.setText("Low", juce::dontSendNotification);
     configureNoteSlider(lowestNoteSlider);
     lowestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -186,7 +240,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "lowestNote",
             lowestNoteSlider);
 
-    highestNoteLabel.setText("High Note", juce::dontSendNotification);
+    highestNoteLabel.setText("High", juce::dontSendNotification);
     configureNoteSlider(highestNoteSlider);
     highestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -262,7 +316,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerMaximum",
             controllerMaximumSlider);
 
-    setSize(700, 780);
+    setSize(1080, 720);
     refreshFromProcessor();
     startTimerHz(30);
 }
@@ -271,73 +325,98 @@ DataSonifierAudioProcessorEditor::~DataSonifierAudioProcessorEditor()
 {
     stopTimer();
     csvTable.getHeader().removeMouseListener(this);
+    setLookAndFeel(nullptr);
 }
 
 //==============================================================================
 void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
 {
-    // (Our component is opaque, so we must completely fill the background with a solid colour)
-    g.fillAll(getLookAndFeel().findColour(juce::ResizableWindow::backgroundColourId));
+    const auto shell = juce::Colour(0xffb8c1a8);
+    const auto shellDark = juce::Colour(0xff7f907f);
+    const auto panel = juce::Colour(0xffd2d7c4);
+    const auto lcd = juce::Colour(0xff102c2d);
+    const auto ink = juce::Colour(0xff263a33);
+    const auto mint = juce::Colour(0xff73cdbd);
+
+    g.fillAll(shell);
+
+    g.setGradientFill(juce::ColourGradient(
+        juce::Colour(0xff40584e), 0.0f, 0.0f,
+        juce::Colour(0xff2d433b), 0.0f, 58.0f, false));
+    g.fillRect(0, 0, getWidth(), 58);
+
+    g.setColour(juce::Colour(0xffe7eee4));
+    g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
+    g.drawText("DATA SONIFIER", 24, 8, 260, 28,
+        juce::Justification::centredLeft);
+    g.setColour(mint);
+    g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
+    g.drawText("SPREADSHEET TO MIDI", 26, 34, 240, 16,
+        juce::Justification::centredLeft);
+
+    const auto drawPanel = [&](juce::Rectangle<int> area,
+                               const juce::String& title,
+                               bool screen)
+    {
+        g.setColour(screen ? lcd : panel);
+        g.fillRoundedRectangle(area.toFloat(), 7.0f);
+        g.setColour(screen ? mint.withAlpha(0.65f) : shellDark);
+        g.drawRoundedRectangle(area.toFloat(), 7.0f, 1.5f);
+        g.setColour(screen ? mint : ink);
+        g.setFont(juce::FontOptions(12.0f, juce::Font::bold));
+        g.drawText(title, area.getX() + 12, area.getY() + 7,
+            area.getWidth() - 24, 18, juce::Justification::centredLeft);
+    };
+
+    drawPanel({ 24, 76, 650, 620 }, "DATA DISPLAY", true);
+    drawPanel({ 696, 76, 360, 112 }, "DATA SOURCE", false);
+    drawPanel({ 696, 200, 360, 142 }, "CLOCK + OUTPUT", false);
+    drawPanel({ 696, 354, 360, 190 }, "NOTE MAPPING", false);
+    drawPanel({ 696, 556, 360, 140 }, "CONTROLLER OUT", false);
+
+    g.setColour(ink.withAlpha(0.7f));
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.drawText("SERIES", 712, 100, 205, 14, juce::Justification::left);
+    g.drawText("TRANSFORM", 928, 100, 112, 14, juce::Justification::left);
 }
 
 void DataSonifierAudioProcessorEditor::resized()
 {
-    openCsvButton.setBounds(20, 20, 150, 30);
-    seriesSelector.setBounds(20, 60, 220, 30);
-    transformSelector.setBounds(260, 60, 150, 30);
-    outputModeLabel.setBounds(430, 60, 50, 30);
-    outputModeSelector.setBounds(480, 60, getWidth() - 500, 30);
+    openCsvButton.setBounds(getWidth() - 176, 14, 148, 32);
 
-    timingModeLabel.setBounds(20, 100, 50, 30);
-    timingModeSelector.setBounds(70, 100, 100, 30);
+    seriesSelector.setBounds(712, 118, 204, 42);
+    transformSelector.setBounds(928, 118, 112, 42);
 
-    subdivisionLabel.setBounds(190, 100, 60, 30);
-    subdivisionSelector.setBounds(250, 100, 100, 30);
+    outputModeLabel.setBounds(712, 226, 55, 28);
+    outputModeSelector.setBounds(770, 226, 270, 30);
+    timingModeLabel.setBounds(712, 266, 55, 28);
+    timingModeSelector.setBounds(770, 266, 90, 30);
+    subdivisionLabel.setBounds(870, 266, 60, 28);
+    subdivisionSelector.setBounds(930, 266, 110, 30);
+    playbackSpeedLabel.setBounds(712, 304, 55, 28);
+    playbackSpeedSlider.setBounds(770, 304, 270, 30);
 
-    playbackSpeedLabel.setBounds(370, 100, 55, 30);
-    playbackSpeedSlider.setBounds(425, 100, getWidth() - 445, 30);
+    pitchMappingModeLabel.setBounds(712, 380, 78, 28);
+    pitchMappingModeSelector.setBounds(792, 380, 248, 30);
+    lowestNoteLabel.setBounds(712, 420, 48, 28);
+    lowestNoteSlider.setBounds(760, 420, 110, 30);
+    highestNoteLabel.setBounds(882, 420, 48, 28);
+    highestNoteSlider.setBounds(930, 420, 110, 30);
+    centreNoteLabel.setBounds(712, 464, 48, 28);
+    centreNoteSlider.setBounds(760, 464, 110, 30);
+    pitchSpreadLabel.setBounds(882, 464, 48, 28);
+    pitchSpreadSlider.setBounds(930, 464, 110, 30);
 
-    pitchMappingModeLabel.setBounds(20, 140, 75, 30);
-    pitchMappingModeSelector.setBounds(95, 140, 140, 30);
+    controllerNumberLabel.setBounds(712, 586, 78, 28);
+    controllerNumberSlider.setBounds(790, 586, 250, 30);
+    controllerMinimumLabel.setBounds(712, 628, 50, 28);
+    controllerMinimumSlider.setBounds(762, 628, 105, 30);
+    controllerMaximumLabel.setBounds(885, 628, 50, 28);
+    controllerMaximumSlider.setBounds(935, 628, 105, 30);
 
-    lowestNoteLabel.setBounds(255, 140, 80, 30);
-    lowestNoteSlider.setBounds(335, 140, 120, 30);
-
-    highestNoteLabel.setBounds(480, 140, 80, 30);
-    highestNoteSlider.setBounds(560, 140, 120, 30);
-
-    centreNoteLabel.setBounds(20, 180, 50, 30);
-    centreNoteSlider.setBounds(70, 180, 255, 30);
-
-    pitchSpreadLabel.setBounds(350, 180, 50, 30);
-    pitchSpreadSlider.setBounds(400, 180, getWidth() - 420, 30);
-
-    controllerNumberLabel.setBounds(20, 220, 75, 30);
-    controllerNumberSlider.setBounds(95, 220, 140, 30);
-
-    controllerMinimumLabel.setBounds(255, 220, 55, 30);
-    controllerMinimumSlider.setBounds(310, 220, 165, 30);
-
-    controllerMaximumLabel.setBounds(490, 220, 55, 30);
-    controllerMaximumSlider.setBounds(545, 220, getWidth() - 565, 30);
-
-    csvTable.setBounds(
-        20,
-        260,
-        getWidth() - 40,
-        220);
-
-    selectedCellLabel.setBounds(
-        20,
-        490,
-        getWidth() - 40,
-        30);
-
-    seriesGraph.setBounds(
-        20,
-        530,
-        getWidth() - 40,
-        getHeight() - 550);
+    csvTable.setBounds(42, 112, 614, 260);
+    selectedCellLabel.setBounds(42, 382, 614, 26);
+    seriesGraph.setBounds(42, 416, 614, 258);
 }
 
 int DataSonifierAudioProcessorEditor::getNumRows()

@@ -50,11 +50,11 @@ public:
         bounds.removeFromTop(40.0f);
         bounds.removeFromBottom(15.0f);
 
-        g.fillAll(juce::Colours::darkgrey.darker());
+        g.fillAll(juce::Colour(0xff0b2425));
         
         
 
-        g.setColour(juce::Colour(120, 120, 120));
+        g.setColour(juce::Colour(0xff416f6c));
 
         // Y axis
         g.drawLine(
@@ -74,7 +74,7 @@ public:
 
         if (values.size() < 2)
         {
-            g.setColour(juce::Colours::lightgrey);
+            g.setColour(juce::Colour(0xff9bc4bb));
             g.drawText(
                 "Select a numeric series",
                 getLocalBounds(),
@@ -96,7 +96,7 @@ public:
 
         if (!std::isfinite(minimum) || !std::isfinite(maximum))
         {
-            g.setColour(juce::Colours::lightgrey);
+            g.setColour(juce::Colour(0xff9bc4bb));
             g.drawText(
                 "No valid numeric values",
                 getLocalBounds(),
@@ -158,7 +158,7 @@ public:
             }
         }
 
-        g.setColour(juce::Colours::white);
+        g.setColour(juce::Colour(0xffc9ded5));
         g.setFont(16.0f);
 
         g.drawText(
@@ -169,7 +169,7 @@ public:
             25,
             juce::Justification::centred);
 
-        g.setColour(juce::Colours::cyan);
+        g.setColour(juce::Colour(0xff55d6c2));
         g.strokePath(graphPath, juce::PathStrokeType(2.0f,
             juce::PathStrokeType::curved,
             juce::PathStrokeType::rounded));
@@ -197,7 +197,7 @@ public:
                     bounds.getY());
 
                 constexpr float markerDiameter = 12.0f;
-                g.setColour(juce::Colours::red);
+                g.setColour(juce::Colour(0xffff6b45));
                 g.fillEllipse(
                     markerX - markerDiameter * 0.5f,
                     markerY - markerDiameter * 0.5f,
@@ -206,7 +206,7 @@ public:
             }
         }
 
-        g.setColour(juce::Colours::lightgrey);
+        g.setColour(juce::Colour(0xff9bc4bb));
 
         auto formatValue = [](double value)
             {
@@ -271,6 +271,8 @@ private:
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
     DataSonifierAudioProcessor& audioProcessor;
+
+    juce::LookAndFeel_V4 hardwareLookAndFeel;
 
     juce::TextButton openCsvButton{ "Open CSV" };
     std::unique_ptr<juce::FileChooser> fileChooser;
