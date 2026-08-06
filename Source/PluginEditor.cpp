@@ -49,9 +49,9 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     hardwareLookAndFeel.setColour(
         juce::TableListBox::backgroundColourId, lcd);
     hardwareLookAndFeel.setColour(
-        juce::TableHeaderComponent::backgroundColourId, juce::Colour(0xff38544d));
+        juce::TableHeaderComponent::backgroundColourId, lcd);
     hardwareLookAndFeel.setColour(
-        juce::TableHeaderComponent::textColourId, paleText);
+        juce::TableHeaderComponent::textColourId, mint);
     hardwareLookAndFeel.setColour(
         juce::PopupMenu::backgroundColourId, juce::Colour(0xff203b39));
     hardwareLookAndFeel.setColour(
@@ -65,7 +65,9 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(seriesGraph);
     addAndMakeVisible(seriesSelector);
     addAndMakeVisible(selectedCellLabel);
-    addAndMakeVisible(transformSelector);
+    addAndMakeVisible(transformNoneButton);
+    addAndMakeVisible(transformLogButton);
+    addAndMakeVisible(transformDifferenceButton);
     addAndMakeVisible(csvTable);
     addAndMakeVisible(playbackSpeedLabel);
     addAndMakeVisible(playbackSpeedSlider);
@@ -78,31 +80,69 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(highestNoteLabel);
     addAndMakeVisible(highestNoteSlider);
     addAndMakeVisible(pitchMappingModeLabel);
-    addAndMakeVisible(pitchMappingModeSelector);
+    addAndMakeVisible(pitchBoundsButton);
+    addAndMakeVisible(pitchCentreSpreadButton);
     addAndMakeVisible(centreNoteLabel);
     addAndMakeVisible(centreNoteSlider);
     addAndMakeVisible(pitchSpreadLabel);
     addAndMakeVisible(pitchSpreadSlider);
-    addAndMakeVisible(outputModeLabel);
-    addAndMakeVisible(outputModeSelector);
+    addAndMakeVisible(outputNoteButton);
+    addAndMakeVisible(outputControllerButton);
     addAndMakeVisible(controllerNumberLabel);
     addAndMakeVisible(controllerNumberSlider);
     addAndMakeVisible(controllerMinimumLabel);
     addAndMakeVisible(controllerMinimumSlider);
     addAndMakeVisible(controllerMaximumLabel);
     addAndMakeVisible(controllerMaximumSlider);
+    addAndMakeVisible(crtOverlay);
 
     seriesSelector.setTextWhenNothingSelected("Select series");
+    seriesSelector.setColour(juce::ComboBox::backgroundColourId, lcd);
+    seriesSelector.setColour(juce::ComboBox::outlineColourId, mint);
+    seriesSelector.setColour(juce::ComboBox::textColourId, mint);
+    seriesSelector.setColour(juce::ComboBox::arrowColourId, mint);
+
+    openCsvButton.setColour(juce::TextButton::buttonColourId, lcd);
+    openCsvButton.setColour(juce::TextButton::textColourOffId, mint);
+
+    for (auto* button : { &transformNoneButton,
+                          &transformLogButton,
+                          &transformDifferenceButton })
+    {
+        button->setColour(juce::TextButton::buttonColourId, lcd);
+        button->setColour(juce::TextButton::buttonOnColourId, mint);
+        button->setColour(juce::TextButton::textColourOffId, mint);
+        button->setColour(juce::TextButton::textColourOnId, lcd);
+    }
 
     selectedCellLabel.setText("Selected cell: none", juce::dontSendNotification);
     selectedCellLabel.setJustificationType(juce::Justification::topLeft);
     selectedCellLabel.setColour(
         juce::Label::textColourId,
-        juce::Colour(0xffc9ded5));
+        mint);
 
     transformSelector.addItem("None", 1);
     transformSelector.addItem("ln", 2);
     transformSelector.addItem("Difference", 3);
+
+    const auto selectTransform = [this](int transformId)
+    {
+        audioProcessor.setSelectedTransform(transformId);
+        refreshFromProcessor();
+
+        int validValueCount = 0;
+        for (const auto value : processedSeries)
+            if (std::isfinite(value))
+                ++validValueCount;
+
+        selectedCellLabel.setText(
+            "Processed values: " + juce::String(validValueCount),
+            juce::dontSendNotification);
+    };
+
+    transformNoneButton.onClick = [selectTransform]() { selectTransform(1); };
+    transformLogButton.onClick = [selectTransform]() { selectTransform(2); };
+    transformDifferenceButton.onClick = [selectTransform]() { selectTransform(3); };
 
     outputModeLabel.setText("Output", juce::dontSendNotification);
     outputModeSelector.addItemList({ "Note", "Controller" }, 1);
@@ -112,12 +152,32 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "outputMode",
             outputModeSelector);
 
+    const auto selectOutputMode = [this](float normalisedValue)
+    {
+        if (auto* parameter = audioProcessor.getParameterState()
+                .getParameter("outputMode"))
+        {
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost(normalisedValue);
+            parameter->endChangeGesture();
+        }
+    };
+
+    outputNoteButton.onClick = [selectOutputMode]()
+    {
+        selectOutputMode(0.0f);
+    };
+    outputControllerButton.onClick = [selectOutputMode]()
+    {
+        selectOutputMode(1.0f);
+    };
+
     csvTable.setModel(this);
     csvTable.getHeader().addMouseListener(this, false);
     csvTable.getHeader().setStretchToFitActive(false);
     csvTable.setColour(
         juce::TableListBox::outlineColourId,
-        juce::Colour(0xff6f8b7d));
+        mint.withAlpha(0.5f));
     csvTable.setOutlineThickness(1);
 
     openCsvButton.onClick = [this]()
@@ -258,6 +318,26 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "pitchMappingMode",
             pitchMappingModeSelector);
 
+    const auto selectPitchMappingMode = [this](float normalisedValue)
+    {
+        if (auto* parameter = audioProcessor.getParameterState()
+                .getParameter("pitchMappingMode"))
+        {
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost(normalisedValue);
+            parameter->endChangeGesture();
+        }
+    };
+
+    pitchBoundsButton.onClick = [selectPitchMappingMode]()
+    {
+        selectPitchMappingMode(0.0f);
+    };
+    pitchCentreSpreadButton.onClick = [selectPitchMappingMode]()
+    {
+        selectPitchMappingMode(1.0f);
+    };
+
     centreNoteLabel.setText("Centre", juce::dontSendNotification);
     configureNoteSlider(centreNoteSlider);
     centreNoteAttachment = std::make_unique<
@@ -300,7 +380,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerNumber",
             controllerNumberSlider);
 
-    controllerMinimumLabel.setText("CC Min", juce::dontSendNotification);
+    controllerMinimumLabel.setText("Min", juce::dontSendNotification);
     configureControllerSlider(controllerMinimumSlider);
     controllerMinimumAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -308,7 +388,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerMinimum",
             controllerMinimumSlider);
 
-    controllerMaximumLabel.setText("CC Max", juce::dontSendNotification);
+    controllerMaximumLabel.setText("Max", juce::dontSendNotification);
     configureControllerSlider(controllerMaximumSlider);
     controllerMaximumAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -316,7 +396,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerMaximum",
             controllerMaximumSlider);
 
-    setSize(1080, 720);
+    setSize(1280, 620);
     refreshFromProcessor();
     startTimerHz(30);
 }
@@ -368,55 +448,70 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
             area.getWidth() - 24, 18, juce::Justification::centredLeft);
     };
 
-    drawPanel({ 24, 76, 650, 620 }, "DATA DISPLAY", true);
-    drawPanel({ 696, 76, 360, 112 }, "DATA SOURCE", false);
-    drawPanel({ 696, 200, 360, 142 }, "CLOCK + OUTPUT", false);
-    drawPanel({ 696, 354, 360, 190 }, "NOTE MAPPING", false);
-    drawPanel({ 696, 556, 360, 140 }, "CONTROLLER OUT", false);
+    drawPanel({ 24, 76, 642, 520 }, "DATA DISPLAY", true);
+    drawPanel({ 682, 76, 330, 520 }, "MIDI", false);
+    drawPanel({ 1028, 76, 228, 520 }, "MIDI CC TARGET", false);
 
     g.setColour(ink.withAlpha(0.7f));
     g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
-    g.drawText("SERIES", 712, 100, 205, 14, juce::Justification::left);
-    g.drawText("TRANSFORM", 928, 100, 112, 14, juce::Justification::left);
+    g.setColour(mint);
+    g.drawText("FILE", 40, 102, 100, 14, juce::Justification::left);
+    g.drawText("SERIES", 150, 102, 280, 14, juce::Justification::left);
+    g.setColour(juce::Colour(0xff315c52));
+    g.drawText("NOTE / CONTROLLER", 698, 102, 180, 14,
+        juce::Justification::left);
+    g.setColour(juce::Colour(0xff1f302a).withAlpha(0.88f));
+    g.setFont(juce::FontOptions(10.0f, juce::Font::plain));
+    g.drawFittedText(
+        "Used in Controller mode. Match this CC number to the parameter in the receiving synth.",
+        1044, 108, 196, 58,
+        juce::Justification::topLeft, 4);
 }
 
 void DataSonifierAudioProcessorEditor::resized()
 {
-    openCsvButton.setBounds(getWidth() - 176, 14, 148, 32);
+    openCsvButton.setBounds(40, 120, 100, 34);
+    seriesSelector.setBounds(150, 120, 280, 34);
 
-    seriesSelector.setBounds(712, 118, 204, 42);
-    transformSelector.setBounds(928, 118, 112, 42);
+    csvTable.setBounds(40, 168, 494, 166);
+    selectedCellLabel.setBounds(40, 342, 494, 26);
+    seriesGraph.setBounds(40, 376, 494, 198);
+    transformNoneButton.setBounds(550, 190, 96, 34);
+    transformLogButton.setBounds(550, 246, 96, 34);
+    transformDifferenceButton.setBounds(550, 302, 96, 34);
+    crtOverlay.setBounds(24, 76, 642, 520);
+    crtOverlay.toFront(false);
 
-    outputModeLabel.setBounds(712, 226, 55, 28);
-    outputModeSelector.setBounds(770, 226, 270, 30);
-    timingModeLabel.setBounds(712, 266, 55, 28);
-    timingModeSelector.setBounds(770, 266, 90, 30);
-    subdivisionLabel.setBounds(870, 266, 60, 28);
-    subdivisionSelector.setBounds(930, 266, 110, 30);
-    playbackSpeedLabel.setBounds(712, 304, 55, 28);
-    playbackSpeedSlider.setBounds(770, 304, 270, 30);
+    outputNoteButton.setBounds(698, 122, 145, 32);
+    outputControllerButton.setBounds(851, 122, 145, 32);
+    timingModeLabel.setBounds(698, 172, 55, 28);
+    timingModeSelector.setBounds(756, 172, 90, 30);
+    subdivisionLabel.setBounds(856, 172, 60, 28);
+    subdivisionSelector.setBounds(916, 172, 80, 30);
+    playbackSpeedLabel.setBounds(698, 212, 55, 28);
+    playbackSpeedSlider.setBounds(756, 212, 240, 30);
 
-    pitchMappingModeLabel.setBounds(712, 380, 78, 28);
-    pitchMappingModeSelector.setBounds(792, 380, 248, 30);
-    lowestNoteLabel.setBounds(712, 420, 48, 28);
-    lowestNoteSlider.setBounds(760, 420, 110, 30);
-    highestNoteLabel.setBounds(882, 420, 48, 28);
-    highestNoteSlider.setBounds(930, 420, 110, 30);
-    centreNoteLabel.setBounds(712, 464, 48, 28);
-    centreNoteSlider.setBounds(760, 464, 110, 30);
-    pitchSpreadLabel.setBounds(882, 464, 48, 28);
-    pitchSpreadSlider.setBounds(930, 464, 110, 30);
+    pitchMappingModeLabel.setBounds(698, 274, 78, 28);
+    pitchBoundsButton.setBounds(778, 272, 104, 32);
+    pitchCentreSpreadButton.setBounds(890, 272, 106, 32);
+    lowestNoteLabel.setBounds(698, 324, 48, 28);
+    lowestNoteSlider.setBounds(746, 324, 250, 30);
+    highestNoteLabel.setBounds(698, 370, 48, 28);
+    highestNoteSlider.setBounds(746, 370, 250, 30);
+    centreNoteLabel.setBounds(698, 416, 48, 28);
+    centreNoteSlider.setBounds(746, 416, 250, 30);
+    pitchSpreadLabel.setBounds(698, 462, 48, 28);
+    pitchSpreadSlider.setBounds(746, 462, 250, 30);
 
-    controllerNumberLabel.setBounds(712, 586, 78, 28);
-    controllerNumberSlider.setBounds(790, 586, 250, 30);
-    controllerMinimumLabel.setBounds(712, 628, 50, 28);
-    controllerMinimumSlider.setBounds(762, 628, 105, 30);
-    controllerMaximumLabel.setBounds(885, 628, 50, 28);
-    controllerMaximumSlider.setBounds(935, 628, 105, 30);
+    controllerNumberLabel.setBounds(1044, 172, 196, 24);
+    controllerNumberSlider.setBounds(1044, 198, 196, 32);
 
-    csvTable.setBounds(42, 112, 614, 260);
-    selectedCellLabel.setBounds(42, 382, 614, 26);
-    seriesGraph.setBounds(42, 416, 614, 258);
+    // Controller range reuses the same two rows as the note bounds.
+    // Separate components preserve independent Note and Controller settings.
+    controllerMinimumLabel.setBounds(698, 324, 48, 28);
+    controllerMinimumSlider.setBounds(746, 324, 250, 30);
+    controllerMaximumLabel.setBounds(698, 370, 48, 28);
+    controllerMaximumSlider.setBounds(746, 370, 250, 30);
 }
 
 int DataSonifierAudioProcessorEditor::getNumRows()
@@ -445,11 +540,14 @@ void DataSonifierAudioProcessorEditor::paintCell(
     bool isSelectedColumn = columnId == selectedColumn;
     bool isSelectedCell = rowNumber == selectedRow && columnId == selectedColumn;
 
+    const auto screenBackground = juce::Colour(0xff0b2425);
+    const auto screenForeground = juce::Colour(0xff73cdbd);
+
     if (isSelectedColumn)
-        g.fillAll(juce::Colours::darkslategrey);
+        g.fillAll(screenForeground.withAlpha(0.12f));
 
     if (isSelectedCell)
-        g.fillAll(juce::Colours::teal);
+        g.fillAll(screenForeground);
 
     int col = columnId - 1;
 
@@ -459,7 +557,9 @@ void DataSonifierAudioProcessorEditor::paintCell(
 
         if (col >= 0 && col < row.size())
         {
-            g.setColour(juce::Colours::white);
+            g.setColour(isSelectedCell
+                ? screenBackground
+                : screenForeground);
             g.drawText(
                 row[col],
                 4, 2,
@@ -470,7 +570,7 @@ void DataSonifierAudioProcessorEditor::paintCell(
         }
     }
 
-    g.setColour(juce::Colours::darkgrey);
+    g.setColour(screenForeground.withAlpha(0.22f));
     g.drawVerticalLine(width - 1, 0.0f, (float)height);
 }
 
@@ -511,6 +611,12 @@ void DataSonifierAudioProcessorEditor::refreshFromProcessor()
 
     seriesSelector.setSelectedId(selectedColumn, juce::dontSendNotification);
     transformSelector.setSelectedId(state.selectedTransform, juce::dontSendNotification);
+    transformNoneButton.setToggleState(
+        state.selectedTransform == 1, juce::dontSendNotification);
+    transformLogButton.setToggleState(
+        state.selectedTransform == 2, juce::dontSendNotification);
+    transformDifferenceButton.setToggleState(
+        state.selectedTransform == 3, juce::dontSendNotification);
 
     if (selectedColumn > 0 && selectedColumn <= columnHeaders.size())
         seriesGraph.setTitle(columnHeaders[selectedColumn - 1]);
@@ -593,14 +699,40 @@ void DataSonifierAudioProcessorEditor::timerCallback()
     const bool usingBounds = usingNotes && pitchMode == 0;
     const bool usingCentreAndSpread = usingNotes && pitchMode == 1;
 
-    pitchMappingModeSelector.setEnabled(usingNotes);
+    pitchBoundsButton.setEnabled(usingNotes);
+    pitchCentreSpreadButton.setEnabled(usingNotes);
+    pitchBoundsButton.setToggleState(
+        usingBounds, juce::dontSendNotification);
+    pitchCentreSpreadButton.setToggleState(
+        usingCentreAndSpread, juce::dontSendNotification);
     lowestNoteSlider.setEnabled(usingBounds);
     highestNoteSlider.setEnabled(usingBounds);
     centreNoteSlider.setEnabled(usingCentreAndSpread);
     pitchSpreadSlider.setEnabled(usingCentreAndSpread);
 
     const bool usingController = outputMode == 1;
+    outputNoteButton.setToggleState(
+        usingNotes, juce::dontSendNotification);
+    outputControllerButton.setToggleState(
+        usingController, juce::dontSendNotification);
     controllerNumberSlider.setEnabled(usingController);
+
+    pitchMappingModeLabel.setVisible(usingNotes);
+    pitchBoundsButton.setVisible(usingNotes);
+    pitchCentreSpreadButton.setVisible(usingNotes);
+    lowestNoteLabel.setVisible(usingNotes);
+    lowestNoteSlider.setVisible(usingNotes);
+    highestNoteLabel.setVisible(usingNotes);
+    highestNoteSlider.setVisible(usingNotes);
+    centreNoteLabel.setVisible(usingNotes);
+    centreNoteSlider.setVisible(usingNotes);
+    pitchSpreadLabel.setVisible(usingNotes);
+    pitchSpreadSlider.setVisible(usingNotes);
+
+    controllerMinimumLabel.setVisible(usingController);
+    controllerMinimumSlider.setVisible(usingController);
+    controllerMaximumLabel.setVisible(usingController);
+    controllerMaximumSlider.setVisible(usingController);
     controllerMinimumSlider.setEnabled(usingController);
     controllerMaximumSlider.setEnabled(usingController);
 }

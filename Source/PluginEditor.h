@@ -14,6 +14,64 @@
 #include <cmath>
 #include <limits>
 
+class HardwareLookAndFeel : public juce::LookAndFeel_V4
+{
+public:
+    void drawButtonBackground(
+        juce::Graphics& g,
+        juce::Button& button,
+        const juce::Colour& backgroundColour,
+        bool isMouseOverButton,
+        bool isButtonDown) override
+    {
+        auto area = button.getLocalBounds().toFloat().reduced(1.0f);
+        const float radius = area.getHeight() * 0.5f;
+
+        auto colour = backgroundColour;
+        if (isButtonDown)
+            colour = colour.brighter(0.18f);
+        else if (isMouseOverButton)
+            colour = colour.brighter(0.10f);
+
+        g.setColour(colour);
+        g.fillRoundedRectangle(area, radius);
+        g.setColour(button.findColour(
+            button.getToggleState()
+                ? juce::TextButton::textColourOnId
+                : juce::TextButton::textColourOffId).withAlpha(0.65f));
+        g.drawRoundedRectangle(area, radius, 1.0f);
+    }
+};
+
+class CrtOverlayComponent : public juce::Component
+{
+public:
+    CrtOverlayComponent()
+    {
+        setInterceptsMouseClicks(false, false);
+    }
+
+    void paint(juce::Graphics& g) override
+    {
+        const auto mint = juce::Colour(0xff73cdbd);
+
+        g.setColour(mint.withAlpha(0.045f));
+        for (int y = 0; y < getHeight(); y += 4)
+            g.fillRect(0, y, getWidth(), 1);
+
+        juce::ColourGradient vignette(
+            juce::Colours::transparentBlack,
+            getWidth() * 0.5f,
+            getHeight() * 0.5f,
+            juce::Colours::black.withAlpha(0.22f),
+            0.0f,
+            0.0f,
+            true);
+        g.setGradientFill(vignette);
+        g.fillRoundedRectangle(getLocalBounds().toFloat(), 4.0f);
+    }
+};
+
 //==============================================================================
 /**
 */
@@ -54,7 +112,7 @@ public:
         
         
 
-        g.setColour(juce::Colour(0xff416f6c));
+        g.setColour(juce::Colour(0xff73cdbd).withAlpha(0.42f));
 
         // Y axis
         g.drawLine(
@@ -74,7 +132,7 @@ public:
 
         if (values.size() < 2)
         {
-            g.setColour(juce::Colour(0xff9bc4bb));
+            g.setColour(juce::Colour(0xff73cdbd));
             g.drawText(
                 "Select a numeric series",
                 getLocalBounds(),
@@ -96,7 +154,7 @@ public:
 
         if (!std::isfinite(minimum) || !std::isfinite(maximum))
         {
-            g.setColour(juce::Colour(0xff9bc4bb));
+            g.setColour(juce::Colour(0xff73cdbd));
             g.drawText(
                 "No valid numeric values",
                 getLocalBounds(),
@@ -158,7 +216,7 @@ public:
             }
         }
 
-        g.setColour(juce::Colour(0xffc9ded5));
+        g.setColour(juce::Colour(0xff73cdbd));
         g.setFont(16.0f);
 
         g.drawText(
@@ -197,7 +255,7 @@ public:
                     bounds.getY());
 
                 constexpr float markerDiameter = 12.0f;
-                g.setColour(juce::Colour(0xffff6b45));
+                g.setColour(juce::Colour(0xff73cdbd));
                 g.fillEllipse(
                     markerX - markerDiameter * 0.5f,
                     markerY - markerDiameter * 0.5f,
@@ -206,7 +264,7 @@ public:
             }
         }
 
-        g.setColour(juce::Colour(0xff9bc4bb));
+        g.setColour(juce::Colour(0xff73cdbd));
 
         auto formatValue = [](double value)
             {
@@ -272,7 +330,7 @@ private:
     // access the processor object that created it.
     DataSonifierAudioProcessor& audioProcessor;
 
-    juce::LookAndFeel_V4 hardwareLookAndFeel;
+    HardwareLookAndFeel hardwareLookAndFeel;
 
     juce::TextButton openCsvButton{ "Open CSV" };
     std::unique_ptr<juce::FileChooser> fileChooser;
@@ -287,6 +345,9 @@ private:
     int selectedColumn = -1;
 
     juce::ComboBox transformSelector;
+    juce::TextButton transformNoneButton{ "RAW" };
+    juce::TextButton transformLogButton{ "LN" };
+    juce::TextButton transformDifferenceButton{ "DIFF" };
 
     juce::Slider playbackSpeedSlider;
     juce::Label playbackSpeedLabel;
@@ -315,6 +376,8 @@ private:
 
     juce::ComboBox pitchMappingModeSelector;
     juce::Label pitchMappingModeLabel;
+    juce::TextButton pitchBoundsButton{ "BOUNDS" };
+    juce::TextButton pitchCentreSpreadButton{ "CENTRE / SPREAD" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
         pitchMappingModeAttachment;
 
@@ -330,6 +393,8 @@ private:
 
     juce::ComboBox outputModeSelector;
     juce::Label outputModeLabel;
+    juce::TextButton outputNoteButton{ "NOTE" };
+    juce::TextButton outputControllerButton{ "CONTROLLER" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
         outputModeAttachment;
 
@@ -354,6 +419,7 @@ private:
     int selectedHeaderColumn = -1;
 
     SeriesGraphComponent seriesGraph;
+    CrtOverlayComponent crtOverlay;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DataSonifierAudioProcessorEditor)
 };
