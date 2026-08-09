@@ -17,6 +17,108 @@
 class HardwareLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
+    void drawLinearSlider(
+        juce::Graphics& g,
+        int x, int y, int width, int height,
+        float sliderPos,
+        float minSliderPos,
+        float maxSliderPos,
+        juce::Slider::SliderStyle style,
+        juce::Slider& slider) override
+    {
+        juce::ignoreUnused(minSliderPos, maxSliderPos);
+
+        if (style != juce::Slider::LinearHorizontal
+            && style != juce::Slider::LinearBar)
+        {
+            juce::LookAndFeel_V4::drawLinearSlider(
+                g, x, y, width, height, sliderPos,
+                minSliderPos, maxSliderPos, style, slider);
+            return;
+        }
+
+        const float alpha = slider.isEnabled() ? 1.0f : 0.42f;
+        const float centreY = static_cast<float>(y) + height * 0.5f;
+        const auto track = juce::Rectangle<float>(
+            static_cast<float>(x) + 2.0f,
+            centreY - 3.0f,
+            static_cast<float>(width) - 4.0f,
+            6.0f);
+
+        // Recessed slot and a fine highlight imitate a rack-unit fader.
+        g.setColour(juce::Colour(0xff718173).withAlpha(alpha));
+        g.fillRect(track.translated(0.0f, 1.0f));
+        g.setColour(juce::Colour(0xff263a33).withAlpha(alpha));
+        g.fillRect(track);
+        g.setColour(juce::Colour(0xffdbe1d1).withAlpha(0.45f * alpha));
+        g.drawHorizontalLine(
+            static_cast<int>(track.getY()), track.getX(), track.getRight());
+
+        for (int tick = 0; tick <= 4; ++tick)
+        {
+            const float tickX = juce::jmap(
+                static_cast<float>(tick), 0.0f, 4.0f,
+                track.getX() + 2.0f, track.getRight() - 2.0f);
+            g.setColour(juce::Colour(0xff53675d).withAlpha(0.7f * alpha));
+            g.fillRect(juce::Rectangle<float>(tickX - 0.5f,
+                centreY + 5.0f, 1.0f, 3.0f));
+        }
+
+        const auto cap = juce::Rectangle<float>(
+            sliderPos - 6.0f, centreY - 8.0f, 12.0f, 16.0f);
+        g.setColour(slider.findColour(
+            juce::Slider::thumbColourId).darker(0.15f).withAlpha(alpha));
+        g.fillRoundedRectangle(cap, 1.5f);
+        g.setColour(juce::Colour(0xffd8e2d5).withAlpha(0.75f * alpha));
+        g.drawRoundedRectangle(cap, 1.5f, 1.0f);
+        g.drawHorizontalLine(static_cast<int>(centreY),
+            cap.getX() + 2.0f, cap.getRight() - 2.0f);
+    }
+
+    void drawComboBox(
+        juce::Graphics& g,
+        int width, int height,
+        bool isButtonDown,
+        int buttonX, int buttonY,
+        int buttonW, int buttonH,
+        juce::ComboBox& box) override
+    {
+        juce::ignoreUnused(isButtonDown, buttonX, buttonY, buttonW, buttonH);
+        const auto bounds = juce::Rectangle<float>(
+            0.5f, 0.5f, static_cast<float>(width) - 1.0f,
+            static_cast<float>(height) - 1.0f);
+
+        g.setColour(box.findColour(juce::ComboBox::backgroundColourId));
+        g.fillRect(bounds);
+        g.setColour(box.findColour(juce::ComboBox::outlineColourId));
+        g.drawRect(bounds, 1.0f);
+
+        const float centreY = height * 0.5f;
+        const float arrowX = static_cast<float>(width - 16);
+        juce::Path arrow;
+        arrow.addTriangle(
+            arrowX - 4.0f, centreY - 2.0f,
+            arrowX + 4.0f, centreY - 2.0f,
+            arrowX, centreY + 3.0f);
+        g.setColour(box.findColour(juce::ComboBox::arrowColourId));
+        g.fillPath(arrow);
+    }
+
+    juce::Font getComboBoxFont(juce::ComboBox&) override
+    {
+        return juce::Font(juce::FontOptions(
+            "Cascadia Mono", 14.5f, juce::Font::bold));
+    }
+
+    juce::Font getLabelFont(juce::Label& label) override
+    {
+        if (dynamic_cast<juce::Slider*>(label.getParentComponent()) != nullptr)
+            return juce::Font(juce::FontOptions(
+                "Cascadia Mono", 13.5f, juce::Font::bold));
+
+        return juce::LookAndFeel_V4::getLabelFont(label);
+    }
+
     void drawButtonBackground(
         juce::Graphics& g,
         juce::Button& button,
@@ -25,7 +127,11 @@ public:
         bool isButtonDown) override
     {
         auto area = button.getLocalBounds().toFloat().reduced(1.0f);
-        const float radius = area.getHeight() * 0.5f;
+        const bool lcdButton = static_cast<bool>(
+            button.getProperties().getWithDefault("lcdButton", false));
+        const bool hardwareSwitch = static_cast<bool>(
+            button.getProperties().getWithDefault("hardwareSwitch", false));
+        const float radius = lcdButton ? 1.5f : (hardwareSwitch ? 2.0f : 4.0f);
 
         auto colour = backgroundColour;
         if (isButtonDown)
@@ -40,6 +146,33 @@ public:
                 ? juce::TextButton::textColourOnId
                 : juce::TextButton::textColourOffId).withAlpha(0.65f));
         g.drawRoundedRectangle(area, radius, 1.0f);
+    }
+
+    void drawButtonText(
+        juce::Graphics& g,
+        juce::TextButton& button,
+        bool,
+        bool) override
+    {
+        if (static_cast<bool>(button.getProperties()
+                .getWithDefault("hardwareSwitch", false)))
+            return;
+
+        const bool lcdButton = static_cast<bool>(
+            button.getProperties().getWithDefault("lcdButton", false));
+        const auto textColour = button.findColour(
+            button.getToggleState()
+                ? juce::TextButton::textColourOnId
+                : juce::TextButton::textColourOffId);
+
+        g.setColour(textColour);
+        g.setFont(lcdButton
+            ? juce::Font(juce::FontOptions("Cascadia Mono", 14.0f,
+                juce::Font::bold))
+            : juce::Font(juce::FontOptions(14.0f,
+                juce::Font::plain)));
+        g.drawFittedText(button.getButtonText(), button.getLocalBounds().reduced(4, 2),
+            juce::Justification::centred, 1);
     }
 };
 
@@ -356,6 +489,8 @@ private:
 
     juce::ComboBox timingModeSelector;
     juce::Label timingModeLabel;
+    juce::TextButton timingFreeButton{ "FREE" };
+    juce::TextButton timingSyncButton{ "SYNC" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
         timingModeAttachment;
 
@@ -376,8 +511,8 @@ private:
 
     juce::ComboBox pitchMappingModeSelector;
     juce::Label pitchMappingModeLabel;
-    juce::TextButton pitchBoundsButton{ "BOUNDS" };
-    juce::TextButton pitchCentreSpreadButton{ "CENTRE / SPREAD" };
+    juce::TextButton pitchBoundsButton{ "RANGE" };
+    juce::TextButton pitchCentreSpreadButton{ "MIDPOINT / SPREAD" };
     std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
         pitchMappingModeAttachment;
 
@@ -420,6 +555,7 @@ private:
 
     SeriesGraphComponent seriesGraph;
     CrtOverlayComponent crtOverlay;
+    int lastPaintedOutputMode = -1;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DataSonifierAudioProcessorEditor)
 };

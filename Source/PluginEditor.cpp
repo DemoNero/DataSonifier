@@ -31,7 +31,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     hardwareLookAndFeel.setColour(
         juce::ComboBox::outlineColourId, juce::Colour(0xff6f8b7d));
     hardwareLookAndFeel.setColour(
-        juce::ComboBox::textColourId, paleText);
+        juce::ComboBox::textColourId, juce::Colour(0xffbfe4d9));
     hardwareLookAndFeel.setColour(
         juce::ComboBox::arrowColourId, mint);
     hardwareLookAndFeel.setColour(
@@ -43,7 +43,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     hardwareLookAndFeel.setColour(
         juce::Slider::textBoxBackgroundColourId, lcdRaised);
     hardwareLookAndFeel.setColour(
-        juce::Slider::textBoxTextColourId, paleText);
+        juce::Slider::textBoxTextColourId, juce::Colour(0xffbfe4d9));
     hardwareLookAndFeel.setColour(
         juce::Slider::textBoxOutlineColourId, juce::Colour(0xff6f8b7d));
     hardwareLookAndFeel.setColour(
@@ -72,7 +72,8 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(playbackSpeedLabel);
     addAndMakeVisible(playbackSpeedSlider);
     addAndMakeVisible(timingModeLabel);
-    addAndMakeVisible(timingModeSelector);
+    addAndMakeVisible(timingFreeButton);
+    addAndMakeVisible(timingSyncButton);
     addAndMakeVisible(subdivisionLabel);
     addAndMakeVisible(subdivisionSelector);
     addAndMakeVisible(lowestNoteLabel);
@@ -104,11 +105,13 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
 
     openCsvButton.setColour(juce::TextButton::buttonColourId, lcd);
     openCsvButton.setColour(juce::TextButton::textColourOffId, mint);
+    openCsvButton.getProperties().set("lcdButton", true);
 
     for (auto* button : { &transformNoneButton,
                           &transformLogButton,
                           &transformDifferenceButton })
     {
+        button->getProperties().set("lcdButton", true);
         button->setColour(juce::TextButton::buttonColourId, lcd);
         button->setColour(juce::TextButton::buttonOnColourId, mint);
         button->setColour(juce::TextButton::textColourOffId, mint);
@@ -171,6 +174,11 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     {
         selectOutputMode(1.0f);
     };
+
+    for (auto* button : { &outputNoteButton, &outputControllerButton,
+                          &timingFreeButton, &timingSyncButton,
+                          &pitchBoundsButton, &pitchCentreSpreadButton })
+        button->getProperties().set("hardwareSwitch", true);
 
     csvTable.setModel(this);
     csvTable.getHeader().addMouseListener(this, false);
@@ -236,7 +244,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     };
 
     playbackSpeedLabel.setText(
-        "Speed",
+        "SPEED",
         juce::dontSendNotification);
 
     playbackSpeedSlider.setSliderStyle(
@@ -245,7 +253,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     playbackSpeedSlider.setTextBoxStyle(
         juce::Slider::TextBoxRight,
         false,
-        80,
+        96,
         25);
 
     playbackSpeedSlider.setRange(
@@ -254,7 +262,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         0.25);
 
     playbackSpeedSlider.setTextValueSuffix(
-        " notes/s");
+        " NOTE/S");
 
     playbackSpeedAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -262,15 +270,35 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "speed",
             playbackSpeedSlider);
 
-    timingModeLabel.setText("Timing", juce::dontSendNotification);
-    timingModeSelector.addItemList({ "Free", "Sync" }, 1);
+    timingModeLabel.setText("TIMING MODE", juce::dontSendNotification);
+    timingModeSelector.addItemList({ "FREE", "SYNC" }, 1);
     timingModeAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
             audioProcessor.getParameterState(),
             "timingMode",
             timingModeSelector);
 
-    subdivisionLabel.setText("Division", juce::dontSendNotification);
+    const auto selectTimingMode = [this](float normalisedValue)
+    {
+        if (auto* parameter = audioProcessor.getParameterState()
+                .getParameter("timingMode"))
+        {
+            parameter->beginChangeGesture();
+            parameter->setValueNotifyingHost(normalisedValue);
+            parameter->endChangeGesture();
+        }
+    };
+
+    timingFreeButton.onClick = [selectTimingMode]()
+    {
+        selectTimingMode(0.0f);
+    };
+    timingSyncButton.onClick = [selectTimingMode]()
+    {
+        selectTimingMode(1.0f);
+    };
+
+    subdivisionLabel.setText("DIVISION", juce::dontSendNotification);
     subdivisionSelector.addItemList(
         { "1/1", "1/2", "1/4", "1/8", "1/16",
           "1/4T", "1/8T", "1/16T" },
@@ -292,7 +320,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         slider.setRange(0.0, 127.0, 1.0);
     };
 
-    lowestNoteLabel.setText("Low", juce::dontSendNotification);
+    lowestNoteLabel.setText("LOW", juce::dontSendNotification);
     configureNoteSlider(lowestNoteSlider);
     lowestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -300,7 +328,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "lowestNote",
             lowestNoteSlider);
 
-    highestNoteLabel.setText("High", juce::dontSendNotification);
+    highestNoteLabel.setText("HIGH", juce::dontSendNotification);
     configureNoteSlider(highestNoteSlider);
     highestNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -308,9 +336,13 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "highestNote",
             highestNoteSlider);
 
-    pitchMappingModeLabel.setText("Pitch Mode", juce::dontSendNotification);
+    pitchMappingModeLabel.setText("PITCH MODE", juce::dontSendNotification);
+    pitchMappingModeLabel.setFont(
+        juce::FontOptions(10.0f, juce::Font::bold));
+    pitchMappingModeLabel.setColour(
+        juce::Label::textColourId, juce::Colour(0xff315c52));
     pitchMappingModeSelector.addItemList(
-        { "Bounds", "Centre + Spread" },
+        { "Range", "Midpoint + Spread" },
         1);
     pitchMappingModeAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
@@ -338,7 +370,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         selectPitchMappingMode(1.0f);
     };
 
-    centreNoteLabel.setText("Centre", juce::dontSendNotification);
+    centreNoteLabel.setText("MIDPOINT", juce::dontSendNotification);
     configureNoteSlider(centreNoteSlider);
     centreNoteAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -346,7 +378,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "centreNote",
             centreNoteSlider);
 
-    pitchSpreadLabel.setText("Spread", juce::dontSendNotification);
+    pitchSpreadLabel.setText("SPREAD", juce::dontSendNotification);
     pitchSpreadSlider.setSliderStyle(juce::Slider::LinearHorizontal);
     pitchSpreadSlider.setTextBoxStyle(
         juce::Slider::TextBoxRight,
@@ -372,7 +404,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         slider.setRange(0.0, 127.0, 1.0);
     };
 
-    controllerNumberLabel.setText("CC Number", juce::dontSendNotification);
+    controllerNumberLabel.setText("CC NUMBER", juce::dontSendNotification);
     configureControllerSlider(controllerNumberSlider);
     controllerNumberAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -380,7 +412,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerNumber",
             controllerNumberSlider);
 
-    controllerMinimumLabel.setText("Min", juce::dontSendNotification);
+    controllerMinimumLabel.setText("MIN", juce::dontSendNotification);
     configureControllerSlider(controllerMinimumSlider);
     controllerMinimumAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
@@ -388,13 +420,24 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
             "controllerMinimum",
             controllerMinimumSlider);
 
-    controllerMaximumLabel.setText("Max", juce::dontSendNotification);
+    controllerMaximumLabel.setText("MAX", juce::dontSendNotification);
     configureControllerSlider(controllerMaximumSlider);
     controllerMaximumAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(),
             "controllerMaximum",
             controllerMaximumSlider);
+
+    const auto hardwareLegendColour = juce::Colour(0xff315c52);
+    for (auto* label : { &timingModeLabel, &subdivisionLabel,
+                         &playbackSpeedLabel, &lowestNoteLabel,
+                         &highestNoteLabel, &centreNoteLabel,
+                         &pitchSpreadLabel, &controllerNumberLabel,
+                         &controllerMinimumLabel, &controllerMaximumLabel })
+    {
+        label->setFont(juce::FontOptions(11.5f, juce::Font::bold));
+        label->setColour(juce::Label::textColourId, hardwareLegendColour);
+    }
 
     setSize(1280, 620);
     refreshFromProcessor();
@@ -420,18 +463,15 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
 
     g.fillAll(shell);
 
+    // A narrow name strip leaves the interface feeling like rack hardware
+    // instead of a software header.
     g.setGradientFill(juce::ColourGradient(
-        juce::Colour(0xff40584e), 0.0f, 0.0f,
-        juce::Colour(0xff2d433b), 0.0f, 58.0f, false));
-    g.fillRect(0, 0, getWidth(), 58);
-
-    g.setColour(juce::Colour(0xffe7eee4));
-    g.setFont(juce::FontOptions(22.0f, juce::Font::bold));
-    g.drawText("DATA SONIFIER", 24, 8, 260, 28,
-        juce::Justification::centredLeft);
-    g.setColour(mint);
-    g.setFont(juce::FontOptions(11.0f, juce::Font::plain));
-    g.drawText("SPREADSHEET TO MIDI", 26, 34, 240, 16,
+        juce::Colour(0xffd8ddcc), 0.0f, 0.0f,
+        juce::Colour(0xffaeb9a3), 0.0f, 24.0f, false));
+    g.fillRect(0, 0, getWidth(), 24);
+    g.setColour(juce::Colour(0xff7b2f2b));
+    g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
+    g.drawText("DATA SONIFIER", 24, 3, 180, 18,
         juce::Justification::centredLeft);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -448,70 +488,89 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
             area.getWidth() - 24, 18, juce::Justification::centredLeft);
     };
 
-    drawPanel({ 24, 76, 642, 520 }, "DATA DISPLAY", true);
-    drawPanel({ 682, 76, 330, 520 }, "MIDI", false);
-    drawPanel({ 1028, 76, 228, 520 }, "MIDI CC TARGET", false);
+    drawPanel({ 24, 34, 642, 562 }, "DATA DISPLAY", true);
+    drawPanel({ 682, 34, 330, 562 }, "MIDI", false);
+    drawPanel({ 1028, 34, 228, 562 }, "MIDI CC TARGET", false);
 
     g.setColour(ink.withAlpha(0.7f));
-    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
     g.setColour(mint);
-    g.drawText("FILE", 40, 102, 100, 14, juce::Justification::left);
-    g.drawText("SERIES", 150, 102, 280, 14, juce::Justification::left);
+    g.drawText("FILE", 40, 60, 100, 14, juce::Justification::left);
+    g.drawText("SERIES", 150, 60, 280, 14, juce::Justification::left);
     g.setColour(juce::Colour(0xff315c52));
-    g.drawText("NOTE / CONTROLLER", 698, 102, 180, 14,
+    g.drawText("OUTPUT MODE", 698, 60, 180, 14,
         juce::Justification::left);
+
+    const auto hardwareRed = juce::Colour(0xff7b2f2b);
+    g.setColour(hardwareRed);
+    g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
+    g.drawText("NOTE", 720, 78, 78, 14, juce::Justification::centred);
+    g.drawText("CONTROLLER", 862, 78, 100, 14, juce::Justification::centred);
+    g.drawText("FREE", 720, 148, 78, 14, juce::Justification::centred);
+    g.drawText("SYNC", 873, 148, 78, 14, juce::Justification::centred);
+    const int outputMode = static_cast<int>(std::round(
+        audioProcessor.getParameterState()
+            .getRawParameterValue("outputMode")->load()));
+    if (outputMode == 0)
+    {
+        g.drawText("RANGE", 718, 306, 82, 14, juce::Justification::centred);
+        g.drawText("MIDPOINT / SPREAD", 857, 306, 110, 14,
+            juce::Justification::centred);
+    }
+
     g.setColour(juce::Colour(0xff1f302a).withAlpha(0.88f));
     g.setFont(juce::FontOptions(10.0f, juce::Font::plain));
     g.drawFittedText(
-        "Used in Controller mode. Match this CC number to the parameter in the receiving synth.",
-        1044, 108, 196, 58,
-        juce::Justification::topLeft, 4);
+        "Match this CC to the receiving synth control.",
+        1044, 154, 196, 34,
+        juce::Justification::topLeft, 2);
 }
 
 void DataSonifierAudioProcessorEditor::resized()
 {
-    openCsvButton.setBounds(40, 120, 100, 34);
-    seriesSelector.setBounds(150, 120, 280, 34);
+    openCsvButton.setBounds(40, 78, 100, 32);
+    seriesSelector.setBounds(150, 78, 280, 32);
 
-    csvTable.setBounds(40, 168, 494, 166);
-    selectedCellLabel.setBounds(40, 342, 494, 26);
-    seriesGraph.setBounds(40, 376, 494, 198);
-    transformNoneButton.setBounds(550, 190, 96, 34);
-    transformLogButton.setBounds(550, 246, 96, 34);
-    transformDifferenceButton.setBounds(550, 302, 96, 34);
-    crtOverlay.setBounds(24, 76, 642, 520);
+    csvTable.setBounds(40, 126, 494, 166);
+    selectedCellLabel.setBounds(40, 300, 494, 26);
+    seriesGraph.setBounds(40, 334, 494, 240);
+    transformNoneButton.setBounds(550, 148, 96, 30);
+    transformLogButton.setBounds(550, 204, 96, 30);
+    transformDifferenceButton.setBounds(550, 260, 96, 30);
+    crtOverlay.setBounds(24, 34, 642, 562);
     crtOverlay.toFront(false);
 
-    outputNoteButton.setBounds(698, 122, 145, 32);
-    outputControllerButton.setBounds(851, 122, 145, 32);
-    timingModeLabel.setBounds(698, 172, 55, 28);
-    timingModeSelector.setBounds(756, 172, 90, 30);
-    subdivisionLabel.setBounds(856, 172, 60, 28);
-    subdivisionSelector.setBounds(916, 172, 80, 30);
-    playbackSpeedLabel.setBounds(698, 212, 55, 28);
-    playbackSpeedSlider.setBounds(756, 212, 240, 30);
+    outputNoteButton.setBounds(746, 94, 26, 18);
+    outputControllerButton.setBounds(899, 94, 26, 18);
+    timingModeLabel.setBounds(693, 128, 130, 18);
+    timingFreeButton.setBounds(746, 164, 26, 18);
+    timingSyncButton.setBounds(899, 164, 26, 18);
+    subdivisionLabel.setBounds(693, 196, 74, 28);
+    subdivisionSelector.setBounds(778, 196, 100, 30);
+    playbackSpeedLabel.setBounds(693, 236, 62, 28);
+    playbackSpeedSlider.setBounds(756, 236, 240, 30);
 
-    pitchMappingModeLabel.setBounds(698, 274, 78, 28);
-    pitchBoundsButton.setBounds(778, 272, 104, 32);
-    pitchCentreSpreadButton.setBounds(890, 272, 106, 32);
-    lowestNoteLabel.setBounds(698, 324, 48, 28);
-    lowestNoteSlider.setBounds(746, 324, 250, 30);
-    highestNoteLabel.setBounds(698, 370, 48, 28);
-    highestNoteSlider.setBounds(746, 370, 250, 30);
-    centreNoteLabel.setBounds(698, 416, 48, 28);
-    centreNoteSlider.setBounds(746, 416, 250, 30);
-    pitchSpreadLabel.setBounds(698, 462, 48, 28);
-    pitchSpreadSlider.setBounds(746, 462, 250, 30);
+    pitchMappingModeLabel.setBounds(693, 286, 130, 18);
+    pitchBoundsButton.setBounds(746, 322, 26, 18);
+    pitchCentreSpreadButton.setBounds(899, 322, 26, 18);
+    lowestNoteLabel.setBounds(693, 360, 65, 28);
+    lowestNoteSlider.setBounds(758, 360, 238, 30);
+    highestNoteLabel.setBounds(693, 406, 65, 28);
+    highestNoteSlider.setBounds(758, 406, 238, 30);
+    centreNoteLabel.setBounds(693, 452, 65, 28);
+    centreNoteSlider.setBounds(758, 452, 238, 30);
+    pitchSpreadLabel.setBounds(693, 498, 65, 28);
+    pitchSpreadSlider.setBounds(758, 498, 238, 30);
 
-    controllerNumberLabel.setBounds(1044, 172, 196, 24);
-    controllerNumberSlider.setBounds(1044, 198, 196, 32);
+    controllerNumberLabel.setBounds(1039, 90, 201, 24);
+    controllerNumberSlider.setBounds(1044, 116, 196, 32);
 
     // Controller range reuses the same two rows as the note bounds.
     // Separate components preserve independent Note and Controller settings.
-    controllerMinimumLabel.setBounds(698, 324, 48, 28);
-    controllerMinimumSlider.setBounds(746, 324, 250, 30);
-    controllerMaximumLabel.setBounds(698, 370, 48, 28);
-    controllerMaximumSlider.setBounds(746, 370, 250, 30);
+    controllerMinimumLabel.setBounds(693, 360, 65, 28);
+    controllerMinimumSlider.setBounds(758, 360, 238, 30);
+    controllerMaximumLabel.setBounds(693, 406, 65, 28);
+    controllerMaximumSlider.setBounds(758, 406, 238, 30);
 }
 
 int DataSonifierAudioProcessorEditor::getNumRows()
@@ -694,6 +753,24 @@ void DataSonifierAudioProcessorEditor::timerCallback()
     const int outputMode = static_cast<int>(std::round(
         audioProcessor.getParameterState()
             .getRawParameterValue("outputMode")->load()));
+
+    if (lastPaintedOutputMode != outputMode)
+    {
+        lastPaintedOutputMode = outputMode;
+        repaint();
+    }
+
+    const int timingMode = static_cast<int>(std::round(
+        audioProcessor.getParameterState()
+            .getRawParameterValue("timingMode")->load()));
+
+    const bool usingFreeTiming = timingMode == 0;
+    timingFreeButton.setToggleState(
+        usingFreeTiming, juce::dontSendNotification);
+    timingSyncButton.setToggleState(
+        !usingFreeTiming, juce::dontSendNotification);
+    playbackSpeedSlider.setEnabled(usingFreeTiming);
+    subdivisionSelector.setEnabled(!usingFreeTiming);
 
     const bool usingNotes = outputMode == 0;
     const bool usingBounds = usingNotes && pitchMode == 0;

@@ -702,7 +702,7 @@ DataSonifierAudioProcessor::createParameterLayout()
         juce::NormalisableRange<float>{ 0.25f, 8.0f, 0.25f },
         1.0f,
         juce::AudioParameterFloatAttributes{}
-        .withLabel("notes/s")
+        .withLabel("note/s")
         .withStringFromValueFunction([](float value, int)
             {
                 return juce::String(value, 2);
@@ -805,12 +805,12 @@ DataSonifierAudioProcessor::createParameterLayout()
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "pitchMappingMode", 1 },
         "Pitch Mapping Mode",
-        juce::StringArray{ "Bounds", "Centre + Spread" },
+        juce::StringArray{ "Range", "Midpoint + Spread" },
         0));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "centreNote", 1 },
-        "Centre Note",
+        "Midpoint Note",
         0,
         127,
         60,
