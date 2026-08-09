@@ -89,7 +89,6 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(pitchSpreadSlider);
     addAndMakeVisible(outputNoteButton);
     addAndMakeVisible(outputControllerButton);
-    addAndMakeVisible(controllerNumberLabel);
     addAndMakeVisible(controllerNumberSlider);
     addAndMakeVisible(controllerMinimumLabel);
     addAndMakeVisible(controllerMinimumSlider);
@@ -500,6 +499,8 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour(juce::Colour(0xff315c52));
     g.drawText("OUTPUT MODE", 698, 60, 180, 14,
         juce::Justification::left);
+    g.drawText("CC NUMBER", 1044, 60, 180, 14,
+        juce::Justification::left);
 
     const auto hardwareRed = juce::Colour(0xff7b2f2b);
     g.setColour(hardwareRed);
@@ -522,7 +523,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont(juce::FontOptions(10.0f, juce::Font::plain));
     g.drawFittedText(
         "Match this CC to the receiving synth control.",
-        1044, 154, 196, 34,
+        1044, 120, 196, 34,
         juce::Justification::topLeft, 2);
 }
 
@@ -562,8 +563,7 @@ void DataSonifierAudioProcessorEditor::resized()
     pitchSpreadLabel.setBounds(693, 498, 65, 28);
     pitchSpreadSlider.setBounds(758, 498, 238, 30);
 
-    controllerNumberLabel.setBounds(1039, 90, 201, 24);
-    controllerNumberSlider.setBounds(1044, 116, 196, 32);
+    controllerNumberSlider.setBounds(1044, 82, 196, 32);
 
     // Controller range reuses the same two rows as the note bounds.
     // Separate components preserve independent Note and Controller settings.
