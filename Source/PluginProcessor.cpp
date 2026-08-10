@@ -487,7 +487,11 @@ bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
         return false;
 
     juce::StringArray lines;
-    lines.addLines(file.loadFileAsString());
+    // A terminal CR/LF can be returned by StringArray::addLines as one more
+    // logical line. Remove only trailing whitespace before splitting so the
+    // final newline cannot become a phantom observation.
+    const auto csvText = file.loadFileAsString().trimEnd();
+    lines.addLines(csvText);
 
     std::vector<juce::StringArray> parsedRows;
     parsedRows.reserve(static_cast<size_t>(lines.size()));
@@ -514,6 +518,28 @@ bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
         loadedFilePath = file.getFullPathName();
         selectedColumn = columnHeaders.isEmpty() ? -1 : 1;
         selectedTransform = 1;
+
+        dateColumn = -1;
+        for (int column = 0; column < columnHeaders.size(); ++column)
+        {
+            const auto header = columnHeaders[column].toLowerCase();
+            if (header.contains("date") || header.contains("year")
+                || header.contains("time") || header.contains("period"))
+            {
+                dateColumn = column + 1;
+                break;
+            }
+        }
+
+        // Most economic datasets put the observation date in column one.
+        // The user can correct this from the editor if the guess is wrong.
+        if (dateColumn < 1 && !columnHeaders.isEmpty())
+            dateColumn = 1;
+
+        dateRangeStartRow = originalCsvData.empty() ? -1 : 0;
+        dateRangeEndRow = originalCsvData.empty()
+            ? -1
+            : static_cast<int>(originalCsvData.size()) - 1;
 
         rebuildProcessedSeries();
         seriesForMidi = processedSeries;
@@ -553,10 +579,67 @@ void DataSonifierAudioProcessor::setSelectedTransform(int transformId)
     rebuildNormalisedMidiSeries(seriesForMidi);
 }
 
+void DataSonifierAudioProcessor::setDateColumn(int columnId)
+{
+    std::vector<double> seriesForMidi;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+        dateColumn = juce::isPositiveAndBelow(columnId - 1, columnHeaders.size())
+            ? columnId
+            : -1;
+        dateRangeStartRow = originalCsvData.empty() ? -1 : 0;
+        dateRangeEndRow = originalCsvData.empty()
+            ? -1
+            : static_cast<int>(originalCsvData.size()) - 1;
+        rebuildProcessedSeries();
+        seriesForMidi = processedSeries;
+    }
+
+    rebuildNormalisedMidiSeries(seriesForMidi);
+}
+
+void DataSonifierAudioProcessor::setDateRange(int startRow, int endRow)
+{
+    std::vector<double> seriesForMidi;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+        if (originalCsvData.empty())
+        {
+            dateRangeStartRow = -1;
+            dateRangeEndRow = -1;
+        }
+        else
+        {
+            const int finalRow = static_cast<int>(originalCsvData.size()) - 1;
+            startRow = juce::jlimit(0, finalRow, startRow);
+            endRow = juce::jlimit(0, finalRow, endRow);
+            if (startRow > endRow)
+                std::swap(startRow, endRow);
+            dateRangeStartRow = startRow;
+            dateRangeEndRow = endRow;
+        }
+
+        rebuildProcessedSeries();
+        seriesForMidi = processedSeries;
+    }
+
+    rebuildNormalisedMidiSeries(seriesForMidi);
+}
+
 DataSonifierAudioProcessor::DataStateSnapshot
 DataSonifierAudioProcessor::getDataStateSnapshot() const
 {
     const juce::ScopedLock lock(dataStateLock);
+
+    juce::StringArray dateValues;
+    const int dateCol = dateColumn - 1;
+    if (dateCol >= 0)
+    {
+        for (const auto& row : originalCsvData)
+            dateValues.add(dateCol < row.size() ? row[dateCol] : juce::String{});
+    }
 
     return {
         displayCsvData,
@@ -564,25 +647,44 @@ DataSonifierAudioProcessor::getDataStateSnapshot() const
         processedSeries,
         loadedFilePath,
         selectedColumn,
-        selectedTransform
+        selectedTransform,
+        dateColumn,
+        dateRangeStartRow,
+        dateRangeEndRow,
+        dateValues
     };
 }
 
 void DataSonifierAudioProcessor::rebuildProcessedSeries()
 {
-    displayCsvData = originalCsvData;
+    displayCsvData.clear();
     processedSeries.clear();
 
-    if (selectedColumn <= 0 || originalCsvData.empty())
+    if (originalCsvData.empty())
+        return;
+
+    const int finalRow = static_cast<int>(originalCsvData.size()) - 1;
+    const int firstIncludedRow = dateRangeStartRow < 0
+        ? 0
+        : juce::jlimit(0, finalRow, dateRangeStartRow);
+    const int lastIncludedRow = dateRangeEndRow < 0
+        ? finalRow
+        : juce::jlimit(firstIncludedRow, finalRow, dateRangeEndRow);
+
+    displayCsvData.assign(
+        originalCsvData.begin() + firstIncludedRow,
+        originalCsvData.begin() + lastIncludedRow + 1);
+
+    if (selectedColumn <= 0)
         return;
 
     const int col = selectedColumn - 1;
     const double missingValue = std::numeric_limits<double>::quiet_NaN();
 
     std::vector<double> rawValues;
-    rawValues.reserve(originalCsvData.size());
+    rawValues.reserve(displayCsvData.size());
 
-    for (const auto& row : originalCsvData)
+    for (const auto& row : displayCsvData)
     {
         if (col >= row.size())
         {

@@ -64,6 +64,9 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(openCsvButton);
     addAndMakeVisible(seriesGraph);
     addAndMakeVisible(seriesSelector);
+    addAndMakeVisible(dateColumnSelector);
+    addAndMakeVisible(dateStartSelector);
+    addAndMakeVisible(dateEndSelector);
     addAndMakeVisible(selectedCellLabel);
     addAndMakeVisible(transformNoneButton);
     addAndMakeVisible(transformLogButton);
@@ -101,6 +104,20 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     seriesSelector.setColour(juce::ComboBox::outlineColourId, mint);
     seriesSelector.setColour(juce::ComboBox::textColourId, mint);
     seriesSelector.setColour(juce::ComboBox::arrowColourId, mint);
+
+    for (auto* selector : { &dateColumnSelector,
+                            &dateStartSelector,
+                            &dateEndSelector })
+    {
+        selector->setColour(juce::ComboBox::backgroundColourId, lcd);
+        selector->setColour(juce::ComboBox::outlineColourId, mint);
+        selector->setColour(juce::ComboBox::textColourId, mint);
+        selector->setColour(juce::ComboBox::arrowColourId, mint);
+    }
+
+    dateColumnSelector.setTextWhenNothingSelected("Select date column");
+    dateStartSelector.setTextWhenNothingSelected("From");
+    dateEndSelector.setTextWhenNothingSelected("To");
 
     openCsvButton.setColour(juce::TextButton::buttonColourId, lcd);
     openCsvButton.setColour(juce::TextButton::textColourOffId, mint);
@@ -288,6 +305,27 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         }
     };
 
+    dateColumnSelector.onChange = [this]()
+    {
+        audioProcessor.setDateColumn(dateColumnSelector.getSelectedId());
+        refreshFromProcessor();
+    };
+
+    const auto updateDateRange = [this]()
+    {
+        const int startRow = dateStartSelector.getSelectedId() - 1;
+        const int endRow = dateEndSelector.getSelectedId() - 1;
+
+        if (startRow >= 0 && endRow >= 0)
+        {
+            audioProcessor.setDateRange(startRow, endRow);
+            refreshFromProcessor();
+        }
+    };
+
+    dateStartSelector.onChange = updateDateRange;
+    dateEndSelector.onChange = updateDateRange;
+
     timingFreeButton.onClick = [selectTimingMode]()
     {
         selectTimingMode(0.0f);
@@ -472,6 +510,8 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
     g.drawText("DATA SONIFIER", 24, 3, 180, 18,
         juce::Justification::centredLeft);
+    g.drawText("VERSION 1.0", getWidth() - 204, 3, 180, 18,
+        juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
                                const juce::String& title,
@@ -496,6 +536,9 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     g.setColour(mint);
     g.drawText("FILE", 40, 60, 100, 14, juce::Justification::left);
     g.drawText("SERIES", 150, 60, 280, 14, juce::Justification::left);
+    g.drawText("DATE COLUMN", 40, 116, 190, 14, juce::Justification::left);
+    g.drawText("FROM", 240, 116, 135, 14, juce::Justification::left);
+    g.drawText("TO", 385, 116, 135, 14, juce::Justification::left);
     g.setColour(juce::Colour(0xff315c52));
     g.drawText("OUTPUT MODE", 698, 60, 180, 14,
         juce::Justification::left);
@@ -532,9 +575,13 @@ void DataSonifierAudioProcessorEditor::resized()
     openCsvButton.setBounds(40, 78, 100, 32);
     seriesSelector.setBounds(150, 78, 280, 32);
 
-    csvTable.setBounds(40, 126, 494, 166);
-    selectedCellLabel.setBounds(40, 300, 494, 26);
-    seriesGraph.setBounds(40, 334, 494, 240);
+    dateColumnSelector.setBounds(40, 134, 190, 30);
+    dateStartSelector.setBounds(240, 134, 135, 30);
+    dateEndSelector.setBounds(385, 134, 135, 30);
+
+    csvTable.setBounds(40, 178, 494, 140);
+    selectedCellLabel.setBounds(40, 326, 494, 22);
+    seriesGraph.setBounds(40, 354, 494, 220);
     transformNoneButton.setBounds(550, 148, 96, 30);
     transformLogButton.setBounds(550, 204, 96, 30);
     transformDifferenceButton.setBounds(550, 260, 96, 30);
@@ -667,6 +714,7 @@ void DataSonifierAudioProcessorEditor::refreshFromProcessor()
 
     rebuildTableColumns();
     rebuildSeriesSelector();
+    rebuildDateRangeSelectors(state);
 
     seriesSelector.setSelectedId(selectedColumn, juce::dontSendNotification);
     transformSelector.setSelectedId(state.selectedTransform, juce::dontSendNotification);
@@ -739,6 +787,55 @@ void DataSonifierAudioProcessorEditor::mouseDown(
     }
 
     csvTable.repaint();
+}
+
+void DataSonifierAudioProcessorEditor::rebuildDateRangeSelectors(
+    const DataSonifierAudioProcessor::DataStateSnapshot& state)
+{
+    dateColumnSelector.clear(juce::dontSendNotification);
+    for (int col = 0; col < columnHeaders.size(); ++col)
+        dateColumnSelector.addItem(columnHeaders[col], col + 1);
+
+    dateColumnSelector.setSelectedId(
+        state.dateColumn, juce::dontSendNotification);
+
+    dateStartSelector.clear(juce::dontSendNotification);
+    dateEndSelector.clear(juce::dontSendNotification);
+
+    int firstValidRow = -1;
+    int lastValidRow = -1;
+
+    for (int row = 0; row < state.dateValues.size(); ++row)
+    {
+        auto label = state.dateValues[row].trim();
+        if (label.isEmpty())
+            continue;
+
+        if (firstValidRow < 0)
+            firstValidRow = row;
+        lastValidRow = row;
+
+        // ComboBox IDs must be positive, so row zero is represented by ID 1.
+        dateStartSelector.addItem(label, row + 1);
+        dateEndSelector.addItem(label, row + 1);
+    }
+
+    const bool hasDates = firstValidRow >= 0;
+    dateStartSelector.setEnabled(hasDates);
+    dateEndSelector.setEnabled(hasDates);
+
+    if (hasDates)
+    {
+        const int selectedStart = juce::jlimit(
+            firstValidRow, lastValidRow, state.dateRangeStartRow);
+        const int selectedEnd = juce::jlimit(
+            selectedStart, lastValidRow, state.dateRangeEndRow);
+
+        dateStartSelector.setSelectedId(
+            selectedStart + 1, juce::dontSendNotification);
+        dateEndSelector.setSelectedId(
+            selectedEnd + 1, juce::dontSendNotification);
+    }
 }
 
 void DataSonifierAudioProcessorEditor::timerCallback()

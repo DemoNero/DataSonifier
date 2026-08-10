@@ -453,6 +453,8 @@ public:
     void refreshFromProcessor();
     void rebuildTableColumns();
     void rebuildSeriesSelector();
+    void rebuildDateRangeSelectors(
+        const DataSonifierAudioProcessor::DataStateSnapshot& state);
 
     void mouseDown(const juce::MouseEvent& event) override;
 
@@ -472,6 +474,9 @@ private:
 
     juce::TableListBox csvTable;
     juce::ComboBox seriesSelector;
+    juce::ComboBox dateColumnSelector;
+    juce::ComboBox dateStartSelector;
+    juce::ComboBox dateEndSelector;
 
     juce::Label selectedCellLabel;
     int selectedRow = -1;

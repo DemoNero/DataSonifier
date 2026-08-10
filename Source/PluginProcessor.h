@@ -24,6 +24,10 @@ public:
         juce::String loadedFilePath;
         int selectedColumn = -1;
         int selectedTransform = 1;
+        int dateColumn = -1;
+        int dateRangeStartRow = -1;
+        int dateRangeEndRow = -1;
+        juce::StringArray dateValues;
     };
 
     //==============================================================================
@@ -66,6 +70,8 @@ public:
     bool loadCsvFile(const juce::File& file);
     void setSelectedColumn(int columnId);
     void setSelectedTransform(int transformId);
+    void setDateColumn(int columnId);
+    void setDateRange(int startRow, int endRow);
     DataStateSnapshot getDataStateSnapshot() const;
 
     juce::AudioProcessorValueTreeState& getParameterState() noexcept;
@@ -87,6 +93,9 @@ private:
     juce::String loadedFilePath;
     int selectedColumn = -1;
     int selectedTransform = 1;
+    int dateColumn = -1;
+    int dateRangeStartRow = -1;
+    int dateRangeEndRow = -1;
 
     std::shared_ptr<const std::vector<float>> normalisedMidiSeries;
 
