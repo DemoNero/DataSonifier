@@ -510,7 +510,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     g.setFont(juce::FontOptions(11.0f, juce::Font::bold));
     g.drawText("DATA SONIFIER", 24, 3, 180, 18,
         juce::Justification::centredLeft);
-    g.drawText("VERSION 1.0", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 1.1", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,

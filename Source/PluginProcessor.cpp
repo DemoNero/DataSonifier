@@ -798,17 +798,13 @@ DataSonifierAudioProcessor::createParameterLayout()
 {
     juce::AudioProcessorValueTreeState::ParameterLayout layout;
 
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{ "speed", 1 },
-        "Speed",
-        juce::NormalisableRange<float>{ 0.25f, 8.0f, 0.25f },
-        1.0f,
-        juce::AudioParameterFloatAttributes{}
-        .withLabel("note/s")
-        .withStringFromValueFunction([](float value, int)
-            {
-                return juce::String(value, 2);
-            })));
+    // Register parameters in the same order users encounter them in the UI.
+    // Ableton uses registration order for its generic parameter panel.
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "outputMode", 1 },
+        "Output Mode",
+        juce::StringArray{ "Note", "Controller" },
+        0));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "timingMode", 1 },
@@ -824,6 +820,18 @@ DataSonifierAudioProcessor::createParameterLayout()
             "1/4T", "1/8T", "1/16T"
         },
         2));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "speed", 1 },
+        "Speed",
+        juce::NormalisableRange<float>{ 0.25f, 8.0f, 0.25f },
+        1.0f,
+        juce::AudioParameterFloatAttributes{}
+        .withLabel("note/s")
+        .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 2);
+            })));
 
     const auto midiNoteToText = [](int note, int)
     {
@@ -884,6 +892,12 @@ DataSonifierAudioProcessor::createParameterLayout()
         return juce::jlimit(0, 127, midiNote);
     };
 
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "pitchMappingMode", 1 },
+        "Pitch Mode",
+        juce::StringArray{ "Range", "Midpoint + Spread" },
+        0));
+
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "lowestNote", 1 },
         "Lowest Note",
@@ -903,12 +917,6 @@ DataSonifierAudioProcessor::createParameterLayout()
         juce::AudioParameterIntAttributes{}
             .withStringFromValueFunction(midiNoteToText)
             .withValueFromStringFunction(midiNoteFromText)));
-
-    layout.add(std::make_unique<juce::AudioParameterChoice>(
-        juce::ParameterID{ "pitchMappingMode", 1 },
-        "Pitch Mapping Mode",
-        juce::StringArray{ "Range", "Midpoint + Spread" },
-        0));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "centreNote", 1 },
@@ -932,12 +940,6 @@ DataSonifierAudioProcessor::createParameterLayout()
             {
                 return juce::String(value);
             })));
-
-    layout.add(std::make_unique<juce::AudioParameterChoice>(
-        juce::ParameterID{ "outputMode", 1 },
-        "Output Mode",
-        juce::StringArray{ "Note", "Controller" },
-        0));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "controllerNumber", 1 },
