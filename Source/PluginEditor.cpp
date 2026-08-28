@@ -650,7 +650,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     modulationSourceLabel.setText("SOURCE SERIES", juce::dontSendNotification);
     modulationTargetLabel.setText("TARGET", juce::dontSendNotification);
     modulationAmountLabel.setText("AMOUNT", juce::dontSendNotification);
-    modulationTimingLabel.setText("TIMING", juce::dontSendNotification);
+    modulationTimingLabel.setText("MODE", juce::dontSendNotification);
     modulationRateLabel.setText("RATE", juce::dontSendNotification);
     modulationDivisionLabel.setText("DIVISION", juce::dontSendNotification);
     modulationSourceSelector.setTextWhenNothingSelected("Select series");
@@ -1389,7 +1389,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Justification::centredLeft);
     g.drawText("ENGINE", 476, 3, 70, 18,
         juce::Justification::centredRight);
-    g.drawText("VERSION 4.7", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 4.9", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -1449,13 +1449,20 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
         g.drawText("NORMALIZE", 698, 116, 144, 14,
             juce::Justification::left);
-        g.drawText("CYCLE DETECTION", 698, 354, 298, 14,
+        g.drawText("CYCLE DETECTION", 698, 326, 298, 14,
             juce::Justification::left);
         if (!showingModulation)
         {
             g.drawText("ENVELOPE", 1044, 102, 196, 14,
                 juce::Justification::left);
             g.drawText("FILTERS", 1044, 360, 196, 14,
+                juce::Justification::left);
+        }
+        else
+        {
+            g.drawText(selectedModulationRoute == 0 ? "ROUTE 1" : "ROUTE 2",
+                1044, 148, 196, 14, juce::Justification::left);
+            g.drawText("TIMING", 1044, 364, 196, 14,
                 juce::Justification::left);
         }
     }
@@ -1515,17 +1522,17 @@ void DataSonifierAudioProcessorEditor::resized()
     constexpr int wavetableSliderHeight = 30;
 
     wavetableLoopSmoothingLabel.setBounds(
-        wavetableSliderLabelX, 188, wavetableSliderLabelWidth, 18);
+        wavetableSliderLabelX, 174, wavetableSliderLabelWidth, 18);
     wavetableLoopSmoothingSlider.setBounds(
-        wavetableSliderX, 182, wavetableSliderWidth, wavetableSliderHeight);
+        wavetableSliderX, 168, wavetableSliderWidth, wavetableSliderHeight);
     wavetablePositionLabel.setBounds(
-        wavetableSliderLabelX, 230, wavetableSliderLabelWidth, 18);
+        wavetableSliderLabelX, 210, wavetableSliderLabelWidth, 18);
     wavetablePositionSlider.setBounds(
-        wavetableSliderX, 224, wavetableSliderWidth, wavetableSliderHeight);
-    previousCycleButton.setBounds(698, 266, 42, 32);
-    cycleStatusLabel.setBounds(746, 266, 202, 32);
-    nextCycleButton.setBounds(954, 266, 42, 32);
-    auditionCycleButton.setBounds(698, 308, 298, 34);
+        wavetableSliderX, 204, wavetableSliderWidth, wavetableSliderHeight);
+    previousCycleButton.setBounds(698, 242, 42, 32);
+    cycleStatusLabel.setBounds(746, 242, 202, 32);
+    nextCycleButton.setBounds(954, 242, 42, 32);
+    auditionCycleButton.setBounds(698, 280, 298, 34);
     shapingViewButton.setBounds(1078, 78, 26, 18);
     modulationViewButton.setBounds(1180, 78, 26, 18);
     modulationRoute1Button.setBounds(1078, 124, 26, 18);
@@ -1546,20 +1553,20 @@ void DataSonifierAudioProcessorEditor::resized()
     wavetableHighPassCutoffSlider.setBounds(1044, 512, 196, 28);
     wavetableHighPassResonanceLabel.setBounds(1044, 546, 196, 18);
     wavetableHighPassResonanceSlider.setBounds(1044, 564, 196, 28);
-    modulationSourceLabel.setBounds(1044, 156, 196, 18);
-    modulationSourceSelector.setBounds(1044, 176, 196, 30);
-    modulationTargetLabel.setBounds(1044, 220, 196, 18);
-    modulationTargetSelector.setBounds(1044, 240, 196, 30);
-    modulationAmountLabel.setBounds(1044, 284, 196, 18);
-    modulationAmountSlider.setBounds(1044, 304, 196, 30);
-    modulationTimingLabel.setBounds(1044, 348, 196, 18);
-    modulationTimingSelector.setBounds(1044, 368, 196, 30);
-    modulationRateLabel.setBounds(1044, 412, 196, 18);
-    modulationRateSlider.setBounds(1044, 432, 196, 30);
-    modulationDivisionLabel.setBounds(1044, 476, 196, 18);
-    modulationDivisionSelector.setBounds(1044, 496, 196, 30);
-    cycleDetectionMethodLabel.setBounds(698, 376, 72, 28);
-    cycleDetectionMethodSelector.setBounds(778, 376, 218, 28);
+    modulationSourceLabel.setBounds(1044, 170, 196, 18);
+    modulationSourceSelector.setBounds(1044, 190, 196, 30);
+    modulationTargetLabel.setBounds(1044, 234, 196, 18);
+    modulationTargetSelector.setBounds(1044, 254, 196, 30);
+    modulationAmountLabel.setBounds(1044, 298, 196, 18);
+    modulationAmountSlider.setBounds(1044, 318, 196, 30);
+    modulationTimingLabel.setBounds(1044, 386, 196, 18);
+    modulationTimingSelector.setBounds(1044, 406, 196, 30);
+    modulationRateLabel.setBounds(1044, 450, 196, 18);
+    modulationRateSlider.setBounds(1044, 470, 196, 30);
+    modulationDivisionLabel.setBounds(1044, 514, 196, 18);
+    modulationDivisionSelector.setBounds(1044, 534, 196, 30);
+    cycleDetectionMethodLabel.setBounds(698, 346, 72, 28);
+    cycleDetectionMethodSelector.setBounds(778, 346, 218, 28);
     openCsvButton.setBounds(40, 78, 100, 32);
     seriesSelector.setBounds(150, 78, 280, 32);
 
@@ -2387,10 +2394,10 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
     findCyclesButton.setButtonText(
         usingManualSelection ? "RESET SELECTION" : "FIND CYCLES");
 
-    constexpr int methodRowsY = 414;
+    constexpr int methodRowsY = 384;
     const int methodRowCount = cycleMethod == 2 || cycleMethod == 3
         ? 3 : (cycleMethod == 4 ? 2 : (cycleMethod == 1 ? 1 : 0));
-    const int methodRowSpacing = methodRowCount == 1 ? 44 : 32;
+    const int methodRowSpacing = methodRowCount == 1 ? 42 : 30;
     const auto positionCycleRow = [=](juce::Label& label,
                                      juce::Component& control,
                                      int row)
@@ -2410,12 +2417,12 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
     positionCycleRow(hamiltonHorizonLabel, hamiltonHorizonSlider, 0);
     positionCycleRow(hamiltonLagsLabel, hamiltonLagsSlider, 1);
 
-    const int firstCommonY = methodRowCount == 0 ? 438
-        : (methodRowCount == 1 ? 458
-        : (methodRowCount == 2 ? 478 : 510));
-    const int commonRowSpacing = methodRowCount == 0 ? 58
-        : (methodRowCount == 1 ? 44 : 32);
-    const int actionButtonsY = methodRowCount == 3 ? 568 : 554;
+    const int firstCommonY = methodRowCount == 0 ? 410
+        : (methodRowCount == 1 ? 426
+        : (methodRowCount == 2 ? 456 : 474));
+    const int commonRowSpacing = methodRowCount == 0 ? 54
+        : (methodRowCount == 1 ? 42 : 30);
+    const int actionButtonsY = methodRowCount == 3 ? 538 : 526;
     cycleMinimumLengthLabel.setBounds(698, firstCommonY, 110, 18);
     cycleMinimumLengthSlider.setBounds(810, firstCommonY - 6, 186, 30);
     cycleSensitivityLabel.setBounds(
