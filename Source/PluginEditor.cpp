@@ -517,6 +517,8 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(wavetableNormaliseOffButton);
     addAndMakeVisible(wavetableLoopSmoothingLabel);
     addAndMakeVisible(wavetableLoopSmoothingSlider);
+    addAndMakeVisible(wavetablePositionLabel);
+    addAndMakeVisible(wavetablePositionSlider);
     addAndMakeVisible(wavetableAttackLabel);
     addAndMakeVisible(wavetableDecayLabel);
     addAndMakeVisible(wavetableSustainLabel);
@@ -734,7 +736,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     wavetableLoopSmoothingSlider.setSliderStyle(
         juce::Slider::LinearHorizontal);
     wavetableLoopSmoothingSlider.setTextBoxStyle(
-        juce::Slider::TextBoxRight, false, 58, 25);
+        juce::Slider::TextBoxRight, false, 62, 25);
     wavetableAttackAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(), "wavetableAttack",
@@ -771,6 +773,15 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(), "wavetableLoopSmoothing",
             wavetableLoopSmoothingSlider);
+    wavetablePositionLabel.setText(
+        "WT POSITION", juce::dontSendNotification);
+    wavetablePositionSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    wavetablePositionSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight, false, 62, 25);
+    wavetablePositionAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "wavetablePosition",
+            wavetablePositionSlider);
 
     auto* editor = this;
     const auto refreshWavetableDisplay = [editor]()
@@ -804,6 +815,20 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         setNormalise(false);
     };
     wavetableLoopSmoothingSlider.onValueChange = refreshWavetableDisplay;
+    wavetablePositionSlider.onValueChange = [this, refreshWavetableDisplay]()
+    {
+        if (!detectedCycles.empty())
+        {
+            selectedCycle = juce::jlimit(
+                0, static_cast<int>(detectedCycles.size()) - 1,
+                static_cast<int>(std::round(
+                    wavetablePositionSlider.getValue()
+                    * static_cast<double>(detectedCycles.size() - 1))));
+            updateCycleDisplay();
+            csvTable.repaint();
+        }
+        refreshWavetableDisplay();
+    };
 
     const auto configureCycleSlider = [](juce::Slider& slider)
     {
@@ -1305,6 +1330,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     // engine: compact, uppercase hardware lettering in the same dark ink.
     for (auto* label : {
              &wavetableLoopSmoothingLabel,
+             &wavetablePositionLabel,
              &wavetableAttackLabel, &wavetableDecayLabel,
              &wavetableSustainLabel, &wavetableReleaseLabel,
              &wavetableFilterCutoffLabel,
@@ -1363,7 +1389,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Justification::centredLeft);
     g.drawText("ENGINE", 476, 3, 70, 18,
         juce::Justification::centredRight);
-    g.drawText("VERSION 4.2", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 4.7", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -1423,7 +1449,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
         g.drawText("NORMALIZE", 698, 116, 144, 14,
             juce::Justification::left);
-        g.drawText("CYCLE DETECTION", 698, 326, 298, 14,
+        g.drawText("CYCLE DETECTION", 698, 354, 298, 14,
             juce::Justification::left);
         if (!showingModulation)
         {
@@ -1482,12 +1508,24 @@ void DataSonifierAudioProcessorEditor::resized()
     wavetableViewButton.setBounds(911, 78, 26, 18);
     wavetableNormaliseButton.setBounds(757, 146, 26, 18);
     wavetableNormaliseOffButton.setBounds(911, 146, 26, 18);
-    wavetableLoopSmoothingLabel.setBounds(698, 176, 110, 18);
-    wavetableLoopSmoothingSlider.setBounds(810, 170, 186, 30);
-    previousCycleButton.setBounds(698, 218, 42, 32);
-    cycleStatusLabel.setBounds(746, 218, 202, 32);
-    nextCycleButton.setBounds(954, 218, 42, 32);
-    auditionCycleButton.setBounds(698, 258, 298, 34);
+    constexpr int wavetableSliderLabelX = 698;
+    constexpr int wavetableSliderLabelWidth = 110;
+    constexpr int wavetableSliderX = 810;
+    constexpr int wavetableSliderWidth = 186;
+    constexpr int wavetableSliderHeight = 30;
+
+    wavetableLoopSmoothingLabel.setBounds(
+        wavetableSliderLabelX, 188, wavetableSliderLabelWidth, 18);
+    wavetableLoopSmoothingSlider.setBounds(
+        wavetableSliderX, 182, wavetableSliderWidth, wavetableSliderHeight);
+    wavetablePositionLabel.setBounds(
+        wavetableSliderLabelX, 230, wavetableSliderLabelWidth, 18);
+    wavetablePositionSlider.setBounds(
+        wavetableSliderX, 224, wavetableSliderWidth, wavetableSliderHeight);
+    previousCycleButton.setBounds(698, 266, 42, 32);
+    cycleStatusLabel.setBounds(746, 266, 202, 32);
+    nextCycleButton.setBounds(954, 266, 42, 32);
+    auditionCycleButton.setBounds(698, 308, 298, 34);
     shapingViewButton.setBounds(1078, 78, 26, 18);
     modulationViewButton.setBounds(1180, 78, 26, 18);
     modulationRoute1Button.setBounds(1078, 124, 26, 18);
@@ -1520,8 +1558,8 @@ void DataSonifierAudioProcessorEditor::resized()
     modulationRateSlider.setBounds(1044, 432, 196, 30);
     modulationDivisionLabel.setBounds(1044, 476, 196, 18);
     modulationDivisionSelector.setBounds(1044, 496, 196, 30);
-    cycleDetectionMethodLabel.setBounds(698, 346, 72, 28);
-    cycleDetectionMethodSelector.setBounds(778, 346, 218, 28);
+    cycleDetectionMethodLabel.setBounds(698, 376, 72, 28);
+    cycleDetectionMethodSelector.setBounds(778, 376, 218, 28);
     openCsvButton.setBounds(40, 78, 100, 32);
     seriesSelector.setBounds(150, 78, 280, 32);
 
@@ -2049,14 +2087,28 @@ void DataSonifierAudioProcessorEditor::selectCycle(int cycleIndex)
         return;
 
     selectedCycle = cycleIndex;
-    const auto [start, end] = detectedCycles[selectedCycle];
-    if (start >= 0 && end >= start
-        && end < static_cast<int>(cycleAnalysisSeries.size()))
+    std::vector<std::vector<double>> frames;
+    frames.reserve(detectedCycles.size());
+    for (const auto [start, end] : detectedCycles)
     {
-        const std::vector<double> selectedValues(
-            cycleAnalysisSeries.begin() + start,
-            cycleAnalysisSeries.begin() + end + 1);
-        audioProcessor.setWavetableSource(selectedValues);
+        if (start >= 0 && end >= start
+            && end < static_cast<int>(cycleAnalysisSeries.size()))
+            frames.emplace_back(
+                cycleAnalysisSeries.begin() + start,
+                cycleAnalysisSeries.begin() + end + 1);
+    }
+    audioProcessor.setWavetableFrames(frames);
+
+    if (auto* parameter = audioProcessor.getParameterState()
+            .getParameter("wavetablePosition"))
+    {
+        const float position = detectedCycles.size() > 1
+            ? static_cast<float>(selectedCycle)
+                / static_cast<float>(detectedCycles.size() - 1)
+            : 0.0f;
+        parameter->beginChangeGesture();
+        parameter->setValueNotifyingHost(position);
+        parameter->endChangeGesture();
     }
     updateCycleDisplay();
     csvTable.repaint();
@@ -2209,7 +2261,8 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
           &nextCycleButton, &auditionCycleButton,
           &wavetableNormaliseButton, &wavetableNormaliseOffButton,
           &wavetableLoopSmoothingLabel,
-          &wavetableLoopSmoothingSlider, &cycleMinimumLengthLabel,
+          &wavetableLoopSmoothingSlider, &wavetablePositionLabel,
+          &wavetablePositionSlider, &cycleMinimumLengthLabel,
           &wavetableAttackLabel, &wavetableAttackSlider,
           &wavetableDecayLabel, &wavetableDecaySlider,
           &wavetableSustainLabel, &wavetableSustainSlider,
@@ -2334,13 +2387,15 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
     findCyclesButton.setButtonText(
         usingManualSelection ? "RESET SELECTION" : "FIND CYCLES");
 
-    constexpr int methodRowsY = 388;
-    constexpr int compactRowHeight = 36;
+    constexpr int methodRowsY = 414;
+    const int methodRowCount = cycleMethod == 2 || cycleMethod == 3
+        ? 3 : (cycleMethod == 4 ? 2 : (cycleMethod == 1 ? 1 : 0));
+    const int methodRowSpacing = methodRowCount == 1 ? 44 : 32;
     const auto positionCycleRow = [=](juce::Label& label,
                                      juce::Component& control,
                                      int row)
     {
-        const int y = methodRowsY + row * compactRowHeight;
+        const int y = methodRowsY + row * methodRowSpacing;
         label.setBounds(698, y, 110, 18);
         control.setBounds(810, y - 6, 186, 30);
     };
@@ -2355,22 +2410,24 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
     positionCycleRow(hamiltonHorizonLabel, hamiltonHorizonSlider, 0);
     positionCycleRow(hamiltonLagsLabel, hamiltonLagsSlider, 1);
 
-    const int methodRowCount = cycleMethod == 2 || cycleMethod == 3
-        ? 3 : (cycleMethod == 4 ? 2 : (cycleMethod == 1 ? 1 : 0));
-    const int firstCommonY = methodRowsY
-        + methodRowCount * compactRowHeight;
+    const int firstCommonY = methodRowCount == 0 ? 438
+        : (methodRowCount == 1 ? 458
+        : (methodRowCount == 2 ? 478 : 510));
+    const int commonRowSpacing = methodRowCount == 0 ? 58
+        : (methodRowCount == 1 ? 44 : 32);
+    const int actionButtonsY = methodRowCount == 3 ? 568 : 554;
     cycleMinimumLengthLabel.setBounds(698, firstCommonY, 110, 18);
     cycleMinimumLengthSlider.setBounds(810, firstCommonY - 6, 186, 30);
     cycleSensitivityLabel.setBounds(
-        698, firstCommonY + compactRowHeight, 110, 18);
+        698, firstCommonY + commonRowSpacing, 110, 18);
     cycleSensitivitySlider.setBounds(
-        810, firstCommonY + compactRowHeight - 6, 186, 30);
-    findCyclesButton.setBounds(698, firstCommonY + 62, 144, 28);
-    useFullSeriesButton.setBounds(852, firstCommonY + 62, 144, 28);
+        810, firstCommonY + commonRowSpacing - 6, 186, 30);
+    findCyclesButton.setBounds(698, actionButtonsY, 144, 28);
+    useFullSeriesButton.setBounds(852, actionButtonsY, 144, 28);
     if (usingManualSelection)
     {
-        findCyclesButton.setBounds(698, methodRowsY, 144, 32);
-        useFullSeriesButton.setBounds(852, methodRowsY, 144, 32);
+        findCyclesButton.setBounds(698, 470, 144, 32);
+        useFullSeriesButton.setBounds(852, 470, 144, 32);
     }
 
     if (lastEngineMode != engineMode)

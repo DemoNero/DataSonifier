@@ -80,6 +80,8 @@ public:
     void setModulationColumn2(int columnId);
     void setWavetableCycleRange(int startIndex, int endIndex);
     void setWavetableSource(const std::vector<double>& source);
+    void setWavetableFrames(
+        const std::vector<std::vector<double>>& frames);
     void auditionWavetable();
     DataStateSnapshot getDataStateSnapshot() const;
     std::vector<double> getWavetableSnapshot() const;
@@ -93,6 +95,7 @@ private:
     void rebuildModulationSeries();
     void rebuildNormalisedMidiSeries(const std::vector<double>& series);
     void rebuildWavetable(const std::vector<double>& series);
+    void rebuildMorphedWavetable();
     void processWavetableSynth(
         juce::AudioBuffer<float>& buffer,
         juce::MidiBuffer& midiMessages);
@@ -130,6 +133,7 @@ private:
     mutable juce::CriticalSection wavetableSourceLock;
     juce::CriticalSection wavetableBuildLock;
     std::vector<double> currentWavetableSource;
+    std::vector<std::vector<double>> wavetableFrameSources;
 
     double wavetablePhase = 0.0;
     double modulationPhase = 0.0;

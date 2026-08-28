@@ -48,6 +48,7 @@ DataSonifierAudioProcessor::DataSonifierAudioProcessor()
 {
     parameterState.addParameterListener("wavetableNormalize", this);
     parameterState.addParameterListener("wavetableLoopSmoothing", this);
+    parameterState.addParameterListener("wavetablePosition", this);
 }
 
 DataSonifierAudioProcessor::~DataSonifierAudioProcessor()
@@ -55,6 +56,7 @@ DataSonifierAudioProcessor::~DataSonifierAudioProcessor()
     cancelPendingUpdate();
     parameterState.removeParameterListener("wavetableNormalize", this);
     parameterState.removeParameterListener("wavetableLoopSmoothing", this);
+    parameterState.removeParameterListener("wavetablePosition", this);
 }
 
 //==============================================================================
@@ -709,6 +711,10 @@ void DataSonifierAudioProcessor::setWavetableCycleRange(
         modulationCycleStart.store(0);
         modulationCycleEnd.store(-1);
         rebuildWavetable({});
+        {
+            const juce::ScopedLock sourceLock(wavetableSourceLock);
+            wavetableFrameSources.clear();
+        }
         auditionSamplesRemaining.store(0);
         return;
     }
@@ -738,7 +744,22 @@ void DataSonifierAudioProcessor::setWavetableCycleRange(
 void DataSonifierAudioProcessor::setWavetableSource(
     const std::vector<double>& source)
 {
+    {
+        const juce::ScopedLock sourceLock(wavetableSourceLock);
+        wavetableFrameSources.clear();
+    }
     rebuildWavetable(source);
+}
+
+void DataSonifierAudioProcessor::setWavetableFrames(
+    const std::vector<std::vector<double>>& frames)
+{
+    {
+        const juce::ScopedLock sourceLock(wavetableSourceLock);
+        wavetableFrameSources = frames;
+    }
+
+    rebuildMorphedWavetable();
 }
 
 void DataSonifierAudioProcessor::auditionWavetable()
@@ -1085,26 +1106,103 @@ void DataSonifierAudioProcessor::rebuildWavetable(
         std::shared_ptr<const std::vector<float>>(table));
 }
 
+void DataSonifierAudioProcessor::rebuildMorphedWavetable()
+{
+    std::vector<std::vector<double>> frames;
+    {
+        const juce::ScopedLock sourceLock(wavetableSourceLock);
+        frames = wavetableFrameSources;
+    }
+
+    if (frames.empty())
+        return;
+
+    if (frames.size() == 1)
+    {
+        rebuildWavetable(frames.front());
+        return;
+    }
+
+    const float position = juce::jlimit(
+        0.0f, 1.0f,
+        parameterState.getRawParameterValue("wavetablePosition")->load());
+    const double framePosition = position
+        * static_cast<double>(frames.size() - 1);
+    const size_t frameA = static_cast<size_t>(std::floor(framePosition));
+    const size_t frameB = std::min(frameA + 1, frames.size() - 1);
+    const double blend = framePosition - static_cast<double>(frameA);
+
+    // Resample both source cycles to the same modest intermediate length
+    // before blending. rebuildWavetable() then performs the existing
+    // 2,048-sample interpolation, normalization and seam smoothing.
+    constexpr size_t morphSourceSize = 256;
+    const auto resample = [morphSourceSize](
+        const std::vector<double>& source)
+    {
+        std::vector<double> valid;
+        valid.reserve(source.size());
+        for (const double value : source)
+            if (std::isfinite(value))
+                valid.push_back(value);
+
+        std::vector<double> result(morphSourceSize, 0.0);
+        if (valid.empty())
+            return result;
+        if (valid.size() == 1)
+        {
+            std::fill(result.begin(), result.end(), valid.front());
+            return result;
+        }
+
+        const double scale = static_cast<double>(valid.size() - 1)
+            / static_cast<double>(morphSourceSize - 1);
+        for (size_t index = 0; index < morphSourceSize; ++index)
+        {
+            const double sourcePosition = static_cast<double>(index) * scale;
+            const size_t indexA = static_cast<size_t>(sourcePosition);
+            const size_t indexB = std::min(indexA + 1, valid.size() - 1);
+            result[index] = juce::jmap(
+                sourcePosition - static_cast<double>(indexA),
+                valid[indexA], valid[indexB]);
+        }
+        return result;
+    };
+
+    const auto sourceA = resample(frames[frameA]);
+    const auto sourceB = resample(frames[frameB]);
+    std::vector<double> morphed(morphSourceSize);
+    for (size_t index = 0; index < morphSourceSize; ++index)
+        morphed[index] = juce::jmap(blend, sourceA[index], sourceB[index]);
+
+    rebuildWavetable(morphed);
+}
+
 void DataSonifierAudioProcessor::parameterChanged(
     const juce::String& parameterID, float newValue)
 {
     juce::ignoreUnused(newValue);
 
     if (parameterID == "wavetableNormalize"
-        || parameterID == "wavetableLoopSmoothing")
+        || parameterID == "wavetableLoopSmoothing"
+        || parameterID == "wavetablePosition")
         triggerAsyncUpdate();
 }
 
 void DataSonifierAudioProcessor::handleAsyncUpdate()
 {
+    bool hasFrames = false;
     std::vector<double> source;
-
     {
         const juce::ScopedLock sourceLock(wavetableSourceLock);
-        source = currentWavetableSource;
+        hasFrames = !wavetableFrameSources.empty();
+        if (!hasFrames)
+            source = currentWavetableSource;
     }
 
-    rebuildWavetable(source);
+    if (hasFrames)
+        rebuildMorphedWavetable();
+    else
+        rebuildWavetable(source);
 }
 
 void DataSonifierAudioProcessor::processWavetableSynth(
@@ -1530,6 +1628,18 @@ DataSonifierAudioProcessor::createParameterLayout()
         "Wavetable Loop Smoothing",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
         1.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetablePosition", 1 },
+        "Wavetable Position",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.001f },
+        0.0f,
         juce::AudioParameterFloatAttributes{}
             .withLabel("%")
             .withStringFromValueFunction([](float value, int)

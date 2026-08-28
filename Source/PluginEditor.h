@@ -721,6 +721,8 @@ private:
     juce::TextButton wavetableNormaliseOffButton{ "OFF" };
     juce::Label wavetableLoopSmoothingLabel;
     juce::Slider wavetableLoopSmoothingSlider;
+    juce::Label wavetablePositionLabel;
+    juce::Slider wavetablePositionSlider;
     juce::Label wavetableAttackLabel;
     juce::Label wavetableDecayLabel;
     juce::Label wavetableSustainLabel;
@@ -781,6 +783,8 @@ private:
         wavetableHighPassResonanceAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         wavetableLoopSmoothingAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetablePositionAttachment;
     juce::Label cycleStatusLabel;
     std::vector<std::pair<int, int>> detectedCycles;
     std::vector<double> cycleAnalysisSeries;
