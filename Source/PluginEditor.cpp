@@ -872,8 +872,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     cycleSensitivitySlider.setTextValueSuffix(" %");
 
     cycleDetectionMethodSelector.addItemList(
-        { "MEAN CROSSING", "HP FILTER", "BAXTER-KING",
-          "CHRISTIANO-FITZGERALD", "HAMILTON REGRESSION",
+        { "MEAN CROSSING", "HP", "BK", "CF", "HAMILTON",
           "MANUAL SELECTION" }, 1);
     cycleDetectionMethodAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
@@ -1396,7 +1395,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Justification::centredLeft);
     g.drawText("ENGINE", 476, 3, 70, 18,
         juce::Justification::centredRight);
-    g.drawText("VERSION 5.0", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 5.2", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -1462,7 +1461,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         {
             g.drawText("ENVELOPE", 1044, 102, 196, 14,
                 juce::Justification::left);
-            g.drawText("FILTERS", 1044, 360, 196, 14,
+            g.drawText("FILTERS", 1044, 320, 196, 14,
                 juce::Justification::left);
         }
         else
@@ -1552,16 +1551,16 @@ void DataSonifierAudioProcessorEditor::resized()
     wavetableSustainSlider.setBounds(1044, 228, 196, 28);
     wavetableReleaseLabel.setBounds(1044, 260, 196, 18);
     wavetableReleaseSlider.setBounds(1044, 276, 196, 28);
-    wavetableFilterCutoffLabel.setBounds(1044, 378, 196, 18);
-    wavetableFilterCutoffSlider.setBounds(1044, 394, 196, 28);
-    wavetableFilterResonanceLabel.setBounds(1044, 420, 196, 18);
-    wavetableFilterResonanceSlider.setBounds(1044, 436, 196, 28);
-    wavetableHighPassCutoffLabel.setBounds(1044, 462, 196, 18);
-    wavetableHighPassCutoffSlider.setBounds(1044, 478, 196, 28);
-    wavetableHighPassResonanceLabel.setBounds(1044, 504, 196, 18);
-    wavetableHighPassResonanceSlider.setBounds(1044, 520, 196, 28);
-    outputGainLabel.setBounds(1044, 546, 196, 18);
-    outputGainSlider.setBounds(1044, 562, 196, 28);
+    wavetableFilterCutoffLabel.setBounds(1044, 338, 196, 18);
+    wavetableFilterCutoffSlider.setBounds(1044, 354, 196, 28);
+    wavetableFilterResonanceLabel.setBounds(1044, 386, 196, 18);
+    wavetableFilterResonanceSlider.setBounds(1044, 402, 196, 28);
+    wavetableHighPassCutoffLabel.setBounds(1044, 434, 196, 18);
+    wavetableHighPassCutoffSlider.setBounds(1044, 450, 196, 28);
+    wavetableHighPassResonanceLabel.setBounds(1044, 482, 196, 18);
+    wavetableHighPassResonanceSlider.setBounds(1044, 498, 196, 28);
+    outputGainLabel.setBounds(1044, 530, 196, 18);
+    outputGainSlider.setBounds(1044, 546, 196, 28);
     modulationSourceLabel.setBounds(1044, 170, 196, 18);
     modulationSourceSelector.setBounds(1044, 190, 196, 30);
     modulationTargetLabel.setBounds(1044, 234, 196, 18);

@@ -1536,6 +1536,18 @@ DataSonifierAudioProcessor::createParameterLayout()
         juce::StringArray{ "MIDI", "Wavetable" },
         0));
 
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "outputGain", 1 },
+        "Output Gain",
+        juce::NormalisableRange<float>{ -24.0f, 6.0f, 0.1f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("dB")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 1) + " dB";
+            })));
+
     const auto envelopeTimeAttributes =
         juce::AudioParameterFloatAttributes{}
             .withLabel("s")
@@ -1550,21 +1562,21 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableAttack", 1 },
-        "Wavetable Attack",
+        "WT Attack",
         envelopeTimeRange,
         0.01f,
         envelopeTimeAttributes));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableDecay", 1 },
-        "Wavetable Decay",
+        "WT Decay",
         envelopeTimeRange,
         0.15f,
         envelopeTimeAttributes));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableSustain", 1 },
-        "Wavetable Sustain",
+        "WT Sustain",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
         0.8f,
         juce::AudioParameterFloatAttributes{}
@@ -1576,7 +1588,7 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableRelease", 1 },
-        "Wavetable Release",
+        "WT Release",
         envelopeTimeRange,
         0.25f,
         envelopeTimeAttributes));
@@ -1586,7 +1598,7 @@ DataSonifierAudioProcessor::createParameterLayout()
     cutoffRange.setSkewForCentre(1000.0f);
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableFilterCutoff", 1 },
-        "Wavetable LP Cutoff",
+        "WT LP Cutoff",
         cutoffRange,
         20000.0f,
         juce::AudioParameterFloatAttributes{}
@@ -1601,7 +1613,7 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableFilterResonance", 1 },
-        "Wavetable LP Resonance",
+        "WT LP Reso",
         juce::NormalisableRange<float>{ 0.1f, 10.0f, 0.01f },
         0.707f,
         juce::AudioParameterFloatAttributes{}
@@ -1615,7 +1627,7 @@ DataSonifierAudioProcessor::createParameterLayout()
     highPassRange.setSkewForCentre(500.0f);
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableHighPassCutoff", 1 },
-        "Wavetable HP Cutoff",
+        "WT HP Cutoff",
         highPassRange,
         20.0f,
         juce::AudioParameterFloatAttributes{}
@@ -1630,7 +1642,7 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableHighPassResonance", 1 },
-        "Wavetable HP Resonance",
+        "WT HP Reso",
         juce::NormalisableRange<float>{ 0.1f, 10.0f, 0.01f },
         0.707f,
         juce::AudioParameterFloatAttributes{}
@@ -1641,12 +1653,12 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID{ "wavetableNormalize", 1 },
-        "Wavetable Normalize",
+        "WT Normalize",
         true));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetableLoopSmoothing", 1 },
-        "Wavetable Loop Smoothing",
+        "WT Loop Smooth",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
         1.0f,
         juce::AudioParameterFloatAttributes{}
@@ -1658,7 +1670,7 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "wavetablePosition", 1 },
-        "Wavetable Position",
+        "WT Position",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.001f },
         0.0f,
         juce::AudioParameterFloatAttributes{}
@@ -1670,14 +1682,14 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "modulationTarget", 1 },
-        "Data Modulation Target",
+        "Mod 1 Target",
         juce::StringArray{
             "Off", "Amplitude", "LP Cutoff", "HP Cutoff" },
         0));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "modulationAmount", 1 },
-        "Data Modulation Amount",
+        "Mod 1 Amount",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
         0.5f,
         juce::AudioParameterFloatAttributes{}
@@ -1689,14 +1701,14 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "modulationTarget2", 1 },
-        "Data Modulation 2 Target",
+        "Mod 2 Target",
         juce::StringArray{
             "Off", "Amplitude", "LP Cutoff", "HP Cutoff" },
         0));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "modulationAmount2", 1 },
-        "Data Modulation 2 Amount",
+        "Mod 2 Amount",
         juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
         0.5f,
         juce::AudioParameterFloatAttributes{}
@@ -1708,13 +1720,13 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "modulationTimingMode", 1 },
-        "Data Modulation Timing",
+        "Mod Timing",
         juce::StringArray{ "Free", "Sync" },
         0));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "modulationRate", 1 },
-        "Data Modulation Rate",
+        "Mod Rate",
         juce::NormalisableRange<float>{ 0.25f, 16.0f, 0.25f },
         2.0f,
         juce::AudioParameterFloatAttributes{}
@@ -1724,21 +1736,9 @@ DataSonifierAudioProcessor::createParameterLayout()
                 return juce::String(value, 2);
             })));
 
-    layout.add(std::make_unique<juce::AudioParameterFloat>(
-        juce::ParameterID{ "outputGain", 1 },
-        "Output Gain",
-        juce::NormalisableRange<float>{ -24.0f, 6.0f, 0.1f },
-        0.0f,
-        juce::AudioParameterFloatAttributes{}
-            .withLabel("dB")
-            .withStringFromValueFunction([](float value, int)
-            {
-                return juce::String(value, 1) + " dB";
-            })));
-
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "modulationSubdivision", 1 },
-        "Data Modulation Division",
+        "Mod Division",
         juce::StringArray{
             "1/1", "1/2", "1/4", "1/8", "1/16",
             "1/4T", "1/8T", "1/16T" },
@@ -1746,10 +1746,9 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "cycleMethod", 1 },
-        "Cycle Detection Method",
+        "Cycle Method",
         juce::StringArray{
-            "Mean Crossing", "HP Filter", "Baxter-King",
-            "Christiano-Fitzgerald", "Hamilton Regression",
+            "Mean Crossing", "HP", "BK", "CF", "Hamilton",
             "Manual Selection" },
         0));
 
@@ -1764,51 +1763,51 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "bkLowPeriod", 1 },
-        "BK Shortest Period",
+        "BK Min Period",
         juce::NormalisableRange<float>{ 2.0f, 32.0f, 1.0f },
         6.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "bkHighPeriod", 1 },
-        "BK Longest Period",
+        "BK Max Period",
         juce::NormalisableRange<float>{ 3.0f, 128.0f, 1.0f },
         32.0f));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "bkTruncation", 1 },
-        "BK Lead Lag Length",
+        "BK Leads/Lags",
         1, 48, 12));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "cfLowPeriod", 1 },
-        "CF Shortest Period",
+        "CF Min Period",
         juce::NormalisableRange<float>{ 2.0f, 32.0f, 1.0f },
         6.0f));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
         juce::ParameterID{ "cfHighPeriod", 1 },
-        "CF Longest Period",
+        "CF Max Period",
         juce::NormalisableRange<float>{ 3.0f, 128.0f, 1.0f },
         32.0f));
 
     layout.add(std::make_unique<juce::AudioParameterBool>(
         juce::ParameterID{ "cfRemoveDrift", 1 },
-        "CF Remove Drift",
+        "CF Drift",
         true));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "hamiltonHorizon", 1 },
-        "Hamilton Forecast Horizon",
+        "Hamilton Horizon",
         1, 32, 8));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "hamiltonLags", 1 },
-        "Hamilton Lag Count",
+        "Hamilton Lags",
         1, 16, 4));
 
     layout.add(std::make_unique<juce::AudioParameterInt>(
         juce::ParameterID{ "cycleMinLength", 1 },
-        "Cycle Minimum Length",
+        "Cycle Min Length",
         2, 128, 8));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
