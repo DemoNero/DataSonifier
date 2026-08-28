@@ -144,6 +144,8 @@ private:
     juce::ADSR wavetableEnvelope;
     juce::dsp::StateVariableTPTFilter<float> wavetableLowPassFilter;
     juce::dsp::StateVariableTPTFilter<float> wavetableHighPassFilter;
+    juce::dsp::Limiter<float> outputLimiter;
+    juce::SmoothedValue<float> outputGainLinear;
     std::atomic<int> auditionSamplesRemaining{ 0 };
 
     size_t currentSeriesIndex = 0;

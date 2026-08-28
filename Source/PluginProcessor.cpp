@@ -163,6 +163,16 @@ void DataSonifierAudioProcessor::prepareToPlay(
         static_cast<juce::uint32>(samplesPerBlock),
         static_cast<juce::uint32>(juce::jmax(1, getTotalNumOutputChannels())) });
     wavetableHighPassFilter.reset();
+    outputLimiter.prepare({
+        sampleRate,
+        static_cast<juce::uint32>(samplesPerBlock),
+        static_cast<juce::uint32>(juce::jmax(1, getTotalNumOutputChannels())) });
+    outputLimiter.setThreshold(-1.0f);
+    outputLimiter.setRelease(80.0f);
+    outputLimiter.reset();
+    outputGainLinear.reset(sampleRate, 0.05);
+    outputGainLinear.setCurrentAndTargetValue(juce::Decibels::decibelsToGain(
+        parameterState.getRawParameterValue("outputGain")->load()));
 }
 
 void DataSonifierAudioProcessor::releaseResources()
@@ -1489,6 +1499,17 @@ void DataSonifierAudioProcessor::processWavetableSynth(
     wavetableHighPassFilter.setCutoffFrequency(safeHighPassCutoff);
     wavetableHighPassFilter.setResonance(highPassResonance);
     wavetableHighPassFilter.process(filterContext);
+
+    outputGainLinear.setTargetValue(juce::Decibels::decibelsToGain(
+        parameterState.getRawParameterValue("outputGain")->load()));
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        const float gainForSample = outputGainLinear.getNextValue();
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            buffer.setSample(channel, sample,
+                buffer.getSample(channel, sample) * gainForSample);
+    }
+    outputLimiter.process(filterContext);
 }
 
 juce::AudioProcessorValueTreeState&
@@ -1701,6 +1722,18 @@ DataSonifierAudioProcessor::createParameterLayout()
             .withStringFromValueFunction([](float value, int)
             {
                 return juce::String(value, 2);
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "outputGain", 1 },
+        "Output Gain",
+        juce::NormalisableRange<float>{ -24.0f, 6.0f, 0.1f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("dB")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 1) + " dB";
             })));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(

@@ -739,6 +739,8 @@ private:
     juce::Slider wavetableFilterResonanceSlider;
     juce::Slider wavetableHighPassCutoffSlider;
     juce::Slider wavetableHighPassResonanceSlider;
+    juce::Label outputGainLabel;
+    juce::Slider outputGainSlider;
     juce::TextButton shapingViewButton{ "SHAPING" };
     juce::TextButton modulationViewButton{ "MODULATION" };
     juce::TextButton modulationRoute1Button{ "ROUTE 1" };
@@ -781,6 +783,8 @@ private:
         wavetableHighPassCutoffAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         wavetableHighPassResonanceAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        outputGainAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         wavetableLoopSmoothingAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>

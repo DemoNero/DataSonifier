@@ -535,6 +535,8 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(wavetableFilterResonanceSlider);
     addAndMakeVisible(wavetableHighPassCutoffSlider);
     addAndMakeVisible(wavetableHighPassResonanceSlider);
+    addAndMakeVisible(outputGainLabel);
+    addAndMakeVisible(outputGainSlider);
     addAndMakeVisible(shapingViewButton);
     addAndMakeVisible(modulationViewButton);
     addAndMakeVisible(modulationRoute1Button);
@@ -729,6 +731,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     configureEnvelopeControl(
         wavetableHighPassResonanceLabel, wavetableHighPassResonanceSlider,
         "HP RESO");
+    configureEnvelopeControl(outputGainLabel, outputGainSlider, "GAIN");
     wavetableNormaliseButton.getProperties().set("hardwareSwitch", true);
     wavetableNormaliseOffButton.getProperties().set("hardwareSwitch", true);
     wavetableLoopSmoothingLabel.setText(
@@ -769,6 +772,10 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(), "wavetableHighPassResonance",
             wavetableHighPassResonanceSlider);
+    outputGainAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "outputGain",
+            outputGainSlider);
     wavetableLoopSmoothingAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(), "wavetableLoopSmoothing",
@@ -1336,7 +1343,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
              &wavetableFilterCutoffLabel,
              &wavetableFilterResonanceLabel,
              &wavetableHighPassCutoffLabel,
-             &wavetableHighPassResonanceLabel,
+             &wavetableHighPassResonanceLabel, &outputGainLabel,
              &cycleDetectionMethodLabel, &cycleMinimumLengthLabel,
              &cycleSensitivityLabel, &hpLambdaLabel,
              &bkLowPeriodLabel, &bkHighPeriodLabel,
@@ -1389,7 +1396,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Justification::centredLeft);
     g.drawText("ENGINE", 476, 3, 70, 18,
         juce::Justification::centredRight);
-    g.drawText("VERSION 4.9", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 5.0", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -1537,22 +1544,24 @@ void DataSonifierAudioProcessorEditor::resized()
     modulationViewButton.setBounds(1180, 78, 26, 18);
     modulationRoute1Button.setBounds(1078, 124, 26, 18);
     modulationRoute2Button.setBounds(1180, 124, 26, 18);
-    wavetableAttackLabel.setBounds(1044, 120, 196, 18);
-    wavetableAttackSlider.setBounds(1044, 138, 196, 28);
-    wavetableDecayLabel.setBounds(1044, 178, 196, 18);
-    wavetableDecaySlider.setBounds(1044, 196, 196, 28);
-    wavetableSustainLabel.setBounds(1044, 236, 196, 18);
-    wavetableSustainSlider.setBounds(1044, 254, 196, 28);
-    wavetableReleaseLabel.setBounds(1044, 294, 196, 18);
-    wavetableReleaseSlider.setBounds(1044, 312, 196, 28);
+    wavetableAttackLabel.setBounds(1044, 116, 196, 18);
+    wavetableAttackSlider.setBounds(1044, 132, 196, 28);
+    wavetableDecayLabel.setBounds(1044, 164, 196, 18);
+    wavetableDecaySlider.setBounds(1044, 180, 196, 28);
+    wavetableSustainLabel.setBounds(1044, 212, 196, 18);
+    wavetableSustainSlider.setBounds(1044, 228, 196, 28);
+    wavetableReleaseLabel.setBounds(1044, 260, 196, 18);
+    wavetableReleaseSlider.setBounds(1044, 276, 196, 28);
     wavetableFilterCutoffLabel.setBounds(1044, 378, 196, 18);
-    wavetableFilterCutoffSlider.setBounds(1044, 396, 196, 28);
-    wavetableFilterResonanceLabel.setBounds(1044, 436, 196, 18);
-    wavetableFilterResonanceSlider.setBounds(1044, 454, 196, 28);
-    wavetableHighPassCutoffLabel.setBounds(1044, 494, 196, 18);
-    wavetableHighPassCutoffSlider.setBounds(1044, 512, 196, 28);
-    wavetableHighPassResonanceLabel.setBounds(1044, 546, 196, 18);
-    wavetableHighPassResonanceSlider.setBounds(1044, 564, 196, 28);
+    wavetableFilterCutoffSlider.setBounds(1044, 394, 196, 28);
+    wavetableFilterResonanceLabel.setBounds(1044, 420, 196, 18);
+    wavetableFilterResonanceSlider.setBounds(1044, 436, 196, 28);
+    wavetableHighPassCutoffLabel.setBounds(1044, 462, 196, 18);
+    wavetableHighPassCutoffSlider.setBounds(1044, 478, 196, 28);
+    wavetableHighPassResonanceLabel.setBounds(1044, 504, 196, 18);
+    wavetableHighPassResonanceSlider.setBounds(1044, 520, 196, 28);
+    outputGainLabel.setBounds(1044, 546, 196, 18);
+    outputGainSlider.setBounds(1044, 562, 196, 28);
     modulationSourceLabel.setBounds(1044, 170, 196, 18);
     modulationSourceSelector.setBounds(1044, 190, 196, 30);
     modulationTargetLabel.setBounds(1044, 234, 196, 18);
@@ -2278,7 +2287,8 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
           &wavetableFilterResonanceLabel, &wavetableFilterResonanceSlider,
           &wavetableHighPassCutoffLabel, &wavetableHighPassCutoffSlider,
           &wavetableHighPassResonanceLabel,
-          &wavetableHighPassResonanceSlider,
+          &wavetableHighPassResonanceSlider, &outputGainLabel,
+          &outputGainSlider,
           &shapingViewButton, &modulationViewButton,
           &modulationRoute1Button, &modulationRoute2Button,
           &modulationSourceLabel, &modulationSourceSelector,
@@ -2326,7 +2336,9 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
              static_cast<juce::Component*>(&wavetableHighPassCutoffLabel),
              static_cast<juce::Component*>(&wavetableHighPassCutoffSlider),
              static_cast<juce::Component*>(&wavetableHighPassResonanceLabel),
-             static_cast<juce::Component*>(&wavetableHighPassResonanceSlider) })
+             static_cast<juce::Component*>(&wavetableHighPassResonanceSlider),
+             static_cast<juce::Component*>(&outputGainLabel),
+             static_cast<juce::Component*>(&outputGainSlider) })
         component->setVisible(wavetableEngine && !showingModulation);
 
     for (auto* component : {
