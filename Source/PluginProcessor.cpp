@@ -46,10 +46,15 @@ DataSonifierAudioProcessor::DataSonifierAudioProcessor()
      : parameterState(*this, nullptr, "PARAMETERS", createParameterLayout())
 #endif
 {
+    parameterState.addParameterListener("wavetableNormalize", this);
+    parameterState.addParameterListener("wavetableLoopSmoothing", this);
 }
 
 DataSonifierAudioProcessor::~DataSonifierAudioProcessor()
 {
+    cancelPendingUpdate();
+    parameterState.removeParameterListener("wavetableNormalize", this);
+    parameterState.removeParameterListener("wavetableLoopSmoothing", this);
 }
 
 //==============================================================================
@@ -129,6 +134,33 @@ void DataSonifierAudioProcessor::prepareToPlay(
     currentSeriesIndex = 0;
     currentPlaybackIndex.store(-1);
     wasTransportPlaying = false;
+    wavetablePhase = 0.0;
+    modulationPhase = 0.0;
+    activeWavetable.reset();
+    previousWavetable.reset();
+    wavetableCrossfadeSamplesRemaining = 0;
+    wavetableCrossfadeLengthSamples = juce::jmax(
+        1, static_cast<int>(sampleRate * 0.02));
+    wavetableNote = 48;
+    wavetableVelocity = 0.0f;
+    wavetableKeyDown = false;
+    auditionEnvelopeActive = false;
+    wavetableEnvelope.setSampleRate(sampleRate);
+    wavetableEnvelope.reset();
+    wavetableLowPassFilter.setType(
+        juce::dsp::StateVariableTPTFilterType::lowpass);
+    wavetableLowPassFilter.prepare({
+        sampleRate,
+        static_cast<juce::uint32>(samplesPerBlock),
+        static_cast<juce::uint32>(juce::jmax(1, getTotalNumOutputChannels())) });
+    wavetableLowPassFilter.reset();
+    wavetableHighPassFilter.setType(
+        juce::dsp::StateVariableTPTFilterType::highpass);
+    wavetableHighPassFilter.prepare({
+        sampleRate,
+        static_cast<juce::uint32>(samplesPerBlock),
+        static_cast<juce::uint32>(juce::jmax(1, getTotalNumOutputChannels())) });
+    wavetableHighPassFilter.reset();
 }
 
 void DataSonifierAudioProcessor::releaseResources()
@@ -189,6 +221,15 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
         auto* channelData = buffer.getWritePointer (channel);
 
         // ..do something to the data...
+    }
+
+    const int engineMode = static_cast<int>(std::round(
+        parameterState.getRawParameterValue("engineMode")->load()));
+
+    if (engineMode == 1)
+    {
+        processWavetableSynth(buffer, midiMessages);
+        return;
     }
 
     bool transportIsPlaying = false;
@@ -518,6 +559,12 @@ bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
         loadedFilePath = file.getFullPathName();
         selectedColumn = columnHeaders.isEmpty() ? -1 : 1;
         selectedTransform = 1;
+        modulationColumn = -1;
+        modulationColumn2 = -1;
+        parameterState.state.setProperty(
+            "modulationColumn", modulationColumn, nullptr);
+        parameterState.state.setProperty(
+            "modulationColumn2", modulationColumn2, nullptr);
 
         dateColumn = -1;
         for (int column = 0; column < columnHeaders.size(); ++column)
@@ -542,6 +589,7 @@ bool DataSonifierAudioProcessor::loadCsvFile(const juce::File& file)
             : static_cast<int>(originalCsvData.size()) - 1;
 
         rebuildProcessedSeries();
+        rebuildModulationSeries();
         seriesForMidi = processedSeries;
     }
 
@@ -559,6 +607,7 @@ void DataSonifierAudioProcessor::setSelectedColumn(int columnId)
             ? columnId
             : -1;
         rebuildProcessedSeries();
+        rebuildModulationSeries();
         seriesForMidi = processedSeries;
     }
 
@@ -573,6 +622,7 @@ void DataSonifierAudioProcessor::setSelectedTransform(int transformId)
         const juce::ScopedLock lock(dataStateLock);
         selectedTransform = juce::jlimit(1, 3, transformId);
         rebuildProcessedSeries();
+        rebuildModulationSeries();
         seriesForMidi = processedSeries;
     }
 
@@ -593,6 +643,7 @@ void DataSonifierAudioProcessor::setDateColumn(int columnId)
             ? -1
             : static_cast<int>(originalCsvData.size()) - 1;
         rebuildProcessedSeries();
+        rebuildModulationSeries();
         seriesForMidi = processedSeries;
     }
 
@@ -622,10 +673,78 @@ void DataSonifierAudioProcessor::setDateRange(int startRow, int endRow)
         }
 
         rebuildProcessedSeries();
+        rebuildModulationSeries();
         seriesForMidi = processedSeries;
     }
 
     rebuildNormalisedMidiSeries(seriesForMidi);
+}
+
+void DataSonifierAudioProcessor::setModulationColumn(int columnId)
+{
+    const juce::ScopedLock lock(dataStateLock);
+    modulationColumn = juce::isPositiveAndBelow(
+        columnId - 1, columnHeaders.size()) ? columnId : -1;
+    parameterState.state.setProperty(
+        "modulationColumn", modulationColumn, nullptr);
+    rebuildModulationSeries();
+}
+
+void DataSonifierAudioProcessor::setModulationColumn2(int columnId)
+{
+    const juce::ScopedLock lock(dataStateLock);
+    modulationColumn2 = juce::isPositiveAndBelow(
+        columnId - 1, columnHeaders.size()) ? columnId : -1;
+    parameterState.state.setProperty(
+        "modulationColumn2", modulationColumn2, nullptr);
+    rebuildModulationSeries();
+}
+
+void DataSonifierAudioProcessor::setWavetableCycleRange(
+    int startIndex,
+    int endIndex)
+{
+    if (startIndex < 0 || endIndex < startIndex)
+    {
+        modulationCycleStart.store(0);
+        modulationCycleEnd.store(-1);
+        rebuildWavetable({});
+        auditionSamplesRemaining.store(0);
+        return;
+    }
+
+    std::vector<double> cycle;
+
+    {
+        const juce::ScopedLock lock(dataStateLock);
+        if (processedSeries.empty())
+        {
+            rebuildWavetable({});
+            return;
+        }
+
+        const int last = static_cast<int>(processedSeries.size()) - 1;
+        startIndex = juce::jlimit(0, last, startIndex);
+        endIndex = juce::jlimit(startIndex, last, endIndex);
+        modulationCycleStart.store(startIndex);
+        modulationCycleEnd.store(endIndex);
+        cycle.assign(processedSeries.begin() + startIndex,
+                     processedSeries.begin() + endIndex + 1);
+    }
+
+    rebuildWavetable(cycle);
+}
+
+void DataSonifierAudioProcessor::setWavetableSource(
+    const std::vector<double>& source)
+{
+    rebuildWavetable(source);
+}
+
+void DataSonifierAudioProcessor::auditionWavetable()
+{
+    auditionSamplesRemaining.store(
+        juce::jmax(1, static_cast<int>(currentSampleRate)));
 }
 
 DataSonifierAudioProcessor::DataStateSnapshot
@@ -651,8 +770,20 @@ DataSonifierAudioProcessor::getDataStateSnapshot() const
         dateColumn,
         dateRangeStartRow,
         dateRangeEndRow,
-        dateValues
+        dateValues,
+        modulationColumn,
+        modulationColumn2
     };
+}
+
+std::vector<double>
+DataSonifierAudioProcessor::getWavetableSnapshot() const
+{
+    const auto table = std::atomic_load(&wavetable);
+    if (table == nullptr)
+        return {};
+
+    return std::vector<double>(table->begin(), table->end());
 }
 
 void DataSonifierAudioProcessor::rebuildProcessedSeries()
@@ -733,6 +864,63 @@ void DataSonifierAudioProcessor::rebuildProcessedSeries()
     }
 }
 
+void DataSonifierAudioProcessor::rebuildModulationSeries()
+{
+    const auto buildValues = [this](int columnId)
+    {
+        auto values = std::make_shared<std::vector<float>>();
+        if (columnId <= 0 || displayCsvData.empty())
+            return values;
+
+        const int column = columnId - 1;
+        std::vector<double> rawValues;
+        rawValues.reserve(displayCsvData.size());
+        double minimum = std::numeric_limits<double>::infinity();
+        double maximum = -std::numeric_limits<double>::infinity();
+
+        for (const auto& row : displayCsvData)
+        {
+            double value = std::numeric_limits<double>::quiet_NaN();
+            if (column < row.size())
+                tryParseNumber(row[column], value);
+            rawValues.push_back(value);
+            if (std::isfinite(value))
+            {
+                minimum = std::min(minimum, value);
+                maximum = std::max(maximum, value);
+            }
+        }
+
+        const bool validRange = std::isfinite(minimum)
+            && std::isfinite(maximum);
+        values->reserve(rawValues.size());
+        for (const double value : rawValues)
+        {
+            if (!validRange || !std::isfinite(value))
+            {
+                values->push_back(0.5f);
+                continue;
+            }
+            const float normalised = minimum == maximum
+                ? 0.5f
+                : static_cast<float>((value - minimum) / (maximum - minimum));
+            values->push_back(juce::jlimit(0.0f, 1.0f, normalised));
+        }
+        return values;
+    };
+
+    auto values = buildValues(modulationColumn);
+    auto values2 = buildValues(modulationColumn2);
+    std::atomic_store(&normalisedModulationSeries,
+        std::shared_ptr<const std::vector<float>>(values));
+    std::atomic_store(&normalisedModulationSeries2,
+        std::shared_ptr<const std::vector<float>>(values2));
+    modulationCycleStart.store(0);
+    modulationCycleEnd.store(
+        displayCsvData.empty() ? -1
+                               : static_cast<int>(displayCsvData.size()) - 1);
+}
+
 void DataSonifierAudioProcessor::rebuildNormalisedMidiSeries(
     const std::vector<double>& series)
 {
@@ -777,9 +965,432 @@ void DataSonifierAudioProcessor::rebuildNormalisedMidiSeries(
         &normalisedMidiSeries,
         std::shared_ptr<const std::vector<float>>(values));
 
+    rebuildWavetable(series);
+
     DBG("Normalised "
         << values->size()
         << " values for MIDI mapping");
+}
+
+void DataSonifierAudioProcessor::rebuildWavetable(
+    const std::vector<double>& series)
+{
+    const juce::ScopedLock buildLock(wavetableBuildLock);
+
+    {
+        const juce::ScopedLock sourceLock(wavetableSourceLock);
+        currentWavetableSource = series;
+    }
+
+    constexpr size_t wavetableSize = 2048;
+    constexpr size_t seamLength = 128;
+    const bool shouldNormalise = parameterState
+        .getRawParameterValue("wavetableNormalize")->load() >= 0.5f;
+    const float smoothingAmount = juce::jlimit(
+        0.0f, 1.0f,
+        parameterState
+            .getRawParameterValue("wavetableLoopSmoothing")->load());
+
+    std::vector<float> source;
+    source.reserve(series.size());
+
+    double sum = 0.0;
+    for (const double value : series)
+    {
+        if (!std::isfinite(value))
+            continue;
+
+        source.push_back(static_cast<float>(value));
+        sum += value;
+    }
+
+    auto table = std::make_shared<std::vector<float>>();
+
+    if (source.size() >= 2)
+    {
+        const float sourceMean = static_cast<float>(sum / source.size());
+        for (auto& value : source)
+            value -= sourceMean;
+
+        table->resize(wavetableSize);
+
+        // Every detected cycle becomes the same-sized waveform. This keeps
+        // oscillator pitch independent of the number of spreadsheet rows in
+        // the source cycle.
+        const double sourceScale = static_cast<double>(source.size() - 1)
+            / static_cast<double>(wavetableSize - 1);
+
+        for (size_t index = 0; index < wavetableSize; ++index)
+        {
+            const double sourcePosition = static_cast<double>(index)
+                * sourceScale;
+            const size_t indexA = static_cast<size_t>(sourcePosition);
+            const size_t indexB = std::min(indexA + 1, source.size() - 1);
+            const float fraction = static_cast<float>(
+                sourcePosition - static_cast<double>(indexA));
+
+            (*table)[index] = juce::jmap(
+                fraction, source[indexA], source[indexB]);
+        }
+
+        // Bring both sides of the loop smoothly towards the same value. The
+        // smoothstep curve confines the change to a short region around the
+        // wrap point and avoids a click when the oscillator loops.
+        const float seamValue = 0.5f
+            * (table->front() + table->back());
+
+        for (size_t offset = 0; offset < seamLength; ++offset)
+        {
+            const float position = static_cast<float>(offset)
+                / static_cast<float>(seamLength - 1);
+            const float blend = position * position
+                * (3.0f - 2.0f * position);
+            const size_t endIndex = wavetableSize - 1 - offset;
+
+            const float startValue = (*table)[offset];
+            const float endValue = (*table)[endIndex];
+            const float smoothedStart = juce::jmap(
+                blend, seamValue, startValue);
+            const float smoothedEnd = juce::jmap(
+                blend, seamValue, endValue);
+
+            (*table)[offset] = juce::jmap(
+                smoothingAmount, startValue, smoothedStart);
+            (*table)[endIndex] = juce::jmap(
+                smoothingAmount, endValue, smoothedEnd);
+        }
+
+        // Seam processing can introduce a small DC offset, so centre and
+        // normalise the finished table once more.
+        double tableSum = 0.0;
+        for (const float value : *table)
+            tableSum += value;
+
+        const float tableMean = static_cast<float>(
+            tableSum / static_cast<double>(table->size()));
+        float peak = 0.0f;
+
+        for (auto& value : *table)
+        {
+            value -= tableMean;
+            peak = std::max(peak, std::abs(value));
+        }
+
+        if (shouldNormalise && peak > 0.0f)
+            for (auto& value : *table)
+                value /= peak;
+    }
+    std::atomic_store(
+        &wavetable,
+        std::shared_ptr<const std::vector<float>>(table));
+}
+
+void DataSonifierAudioProcessor::parameterChanged(
+    const juce::String& parameterID, float newValue)
+{
+    juce::ignoreUnused(newValue);
+
+    if (parameterID == "wavetableNormalize"
+        || parameterID == "wavetableLoopSmoothing")
+        triggerAsyncUpdate();
+}
+
+void DataSonifierAudioProcessor::handleAsyncUpdate()
+{
+    std::vector<double> source;
+
+    {
+        const juce::ScopedLock sourceLock(wavetableSourceLock);
+        source = currentWavetableSource;
+    }
+
+    rebuildWavetable(source);
+}
+
+void DataSonifierAudioProcessor::processWavetableSynth(
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer& midiMessages)
+{
+    buffer.clear();
+
+    juce::ADSR::Parameters envelopeParameters;
+    envelopeParameters.attack = parameterState
+        .getRawParameterValue("wavetableAttack")->load();
+    envelopeParameters.decay = parameterState
+        .getRawParameterValue("wavetableDecay")->load();
+    envelopeParameters.sustain = parameterState
+        .getRawParameterValue("wavetableSustain")->load();
+    envelopeParameters.release = parameterState
+        .getRawParameterValue("wavetableRelease")->load();
+    wavetableEnvelope.setParameters(envelopeParameters);
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+
+        if (message.isNoteOn())
+        {
+            wavetableNote = message.getNoteNumber();
+            wavetableVelocity = message.getFloatVelocity();
+            wavetableKeyDown = true;
+            auditionEnvelopeActive = false;
+            auditionSamplesRemaining.store(0);
+            wavetableEnvelope.noteOn();
+        }
+        else if ((message.isNoteOff()
+                    && message.getNoteNumber() == wavetableNote)
+                 || message.isAllNotesOff()
+                 || message.isAllSoundOff())
+        {
+            wavetableKeyDown = false;
+            wavetableEnvelope.noteOff();
+        }
+    }
+
+    midiMessages.clear();
+
+    const auto latestWavetable = std::atomic_load(&wavetable);
+
+    if (latestWavetable != activeWavetable)
+    {
+        previousWavetable = activeWavetable;
+        activeWavetable = latestWavetable;
+
+        const bool canCrossfade = previousWavetable != nullptr
+            && previousWavetable->size() >= 2
+            && activeWavetable != nullptr
+            && activeWavetable->size() >= 2;
+        wavetableCrossfadeSamplesRemaining = canCrossfade
+            ? wavetableCrossfadeLengthSamples : 0;
+    }
+
+    const auto& table = activeWavetable;
+    const int auditionRemaining = auditionSamplesRemaining.load();
+    const bool auditioning = auditionRemaining > 0;
+
+    if (auditioning && !wavetableKeyDown && !auditionEnvelopeActive)
+    {
+        wavetableNote = 48;
+        wavetableVelocity = 0.8f;
+        auditionEnvelopeActive = true;
+        wavetableEnvelope.noteOn();
+    }
+
+    if (table == nullptr || table->size() < 2
+        || (!wavetableEnvelope.isActive() && !auditioning))
+        return;
+
+    const auto modulationValues = std::atomic_load(
+        &normalisedModulationSeries);
+    const auto modulationValues2 = std::atomic_load(
+        &normalisedModulationSeries2);
+    const int modulationTarget = static_cast<int>(std::round(
+        parameterState.getRawParameterValue("modulationTarget")->load()));
+    const float modulationAmount = parameterState
+        .getRawParameterValue("modulationAmount")->load();
+    const int modulationTarget2 = static_cast<int>(std::round(
+        parameterState.getRawParameterValue("modulationTarget2")->load()));
+    const float modulationAmount2 = parameterState
+        .getRawParameterValue("modulationAmount2")->load();
+
+    double hostBpm = 120.0;
+    if (auto* playHead = getPlayHead())
+        if (auto position = playHead->getPosition())
+            if (const auto bpm = position->getBpm())
+                hostBpm = *bpm;
+
+    const int modulationTimingMode = static_cast<int>(std::round(
+        parameterState.getRawParameterValue("modulationTimingMode")->load()));
+    double modulationValuesPerSecond = parameterState
+        .getRawParameterValue("modulationRate")->load();
+
+    if (modulationTimingMode == 1)
+    {
+        const int subdivision = juce::jlimit(
+            0, 7, static_cast<int>(std::round(parameterState
+                .getRawParameterValue("modulationSubdivision")->load())));
+        constexpr double quarterNoteLengths[] = {
+            4.0, 2.0, 1.0, 0.5, 0.25,
+            2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0
+        };
+        const double secondsPerStep = (60.0 / juce::jmax(1.0, hostBpm))
+            * quarterNoteLengths[subdivision];
+        modulationValuesPerSecond = 1.0 / secondsPerStep;
+    }
+
+    int modulationPointCount = 1;
+    const auto modulationSize = juce::jmax(
+        modulationValues == nullptr ? 0 : static_cast<int>(modulationValues->size()),
+        modulationValues2 == nullptr ? 0 : static_cast<int>(modulationValues2->size()));
+    if (modulationSize > 0)
+    {
+        const int finalIndex = modulationSize - 1;
+        const int start = juce::jlimit(
+            0, finalIndex, modulationCycleStart.load());
+        const int requestedEnd = modulationCycleEnd.load();
+        const int end = requestedEnd < start
+            ? finalIndex
+            : juce::jlimit(start, finalIndex, requestedEnd);
+        modulationPointCount = juce::jmax(1, end - start + 1);
+    }
+    const double modulationPhaseIncrement = modulationValuesPerSecond
+        / (static_cast<double>(modulationPointCount) * currentSampleRate);
+    const auto readModulation = [this](
+        const std::shared_ptr<const std::vector<float>>& values,
+        double phase)
+    {
+        if (values == nullptr || values->empty())
+            return 0.5f;
+
+        const int finalIndex = static_cast<int>(values->size()) - 1;
+        const int start = juce::jlimit(
+            0, finalIndex, modulationCycleStart.load());
+        const int requestedEnd = modulationCycleEnd.load();
+        const int end = requestedEnd < start
+            ? finalIndex
+            : juce::jlimit(start, finalIndex, requestedEnd);
+
+        if (start == end)
+            return (*values)[static_cast<size_t>(start)];
+
+        const double position = start + phase * (end - start);
+        const int indexA = juce::jlimit(
+            start, end, static_cast<int>(std::floor(position)));
+        const int indexB = juce::jmin(end, indexA + 1);
+        const float fraction = static_cast<float>(position - indexA);
+        return juce::jmap(
+            fraction,
+            (*values)[static_cast<size_t>(indexA)],
+            (*values)[static_cast<size_t>(indexB)]);
+    };
+
+    const double frequency = juce::MidiMessage::getMidiNoteInHertz(
+        wavetableNote);
+    const double phaseIncrement = frequency / currentSampleRate;
+    const float gain = 0.18f * wavetableVelocity;
+
+    const auto readWavetable = [this](
+        const std::shared_ptr<const std::vector<float>>& source)
+    {
+        const int sourceSize = static_cast<int>(source->size());
+        const double tablePosition = wavetablePhase * sourceSize;
+        const int indexA = static_cast<int>(tablePosition) % sourceSize;
+        const int indexB = (indexA + 1) % sourceSize;
+        const float fraction = static_cast<float>(
+            tablePosition - std::floor(tablePosition));
+
+        return juce::jmap(
+            fraction, (*source)[indexA], (*source)[indexB]);
+    };
+
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        const float envelopeValue = wavetableEnvelope.getNextSample();
+        const float currentValue = readWavetable(table);
+        float oscillatorValue = currentValue;
+
+        if (wavetableCrossfadeSamplesRemaining > 0
+            && previousWavetable != nullptr
+            && previousWavetable->size() >= 2)
+        {
+            const float fadeProgress = 1.0f
+                - static_cast<float>(wavetableCrossfadeSamplesRemaining)
+                    / static_cast<float>(wavetableCrossfadeLengthSamples);
+            oscillatorValue = juce::jmap(
+                fadeProgress,
+                readWavetable(previousWavetable),
+                currentValue);
+            --wavetableCrossfadeSamplesRemaining;
+        }
+
+        oscillatorValue = juce::jlimit(-1.0f, 1.0f, oscillatorValue);
+        const auto amplitudeForRoute = [&](
+            int target, float amount,
+            const std::shared_ptr<const std::vector<float>>& values)
+        {
+            return target == 1 && values != nullptr && !values->empty()
+                ? juce::jmap(amount, 1.0f,
+                    readModulation(values, modulationPhase))
+                : 1.0f;
+        };
+        const float amplitudeModulation =
+            amplitudeForRoute(
+                modulationTarget, modulationAmount, modulationValues)
+            * amplitudeForRoute(
+                modulationTarget2, modulationAmount2, modulationValues2);
+        const float value = oscillatorValue * gain * envelopeValue
+            * amplitudeModulation;
+
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            buffer.setSample(channel, sample, value);
+
+        wavetablePhase += phaseIncrement;
+        wavetablePhase -= std::floor(wavetablePhase);
+        modulationPhase += modulationPhaseIncrement;
+        modulationPhase -= std::floor(modulationPhase);
+
+        if (auditionEnvelopeActive && !wavetableKeyDown)
+        {
+            const int remaining = auditionSamplesRemaining.load();
+
+            if (remaining > 1)
+                auditionSamplesRemaining.fetch_sub(1);
+            else if (remaining == 1)
+            {
+                auditionSamplesRemaining.store(0);
+                auditionEnvelopeActive = false;
+                wavetableEnvelope.noteOff();
+            }
+        }
+    }
+
+    const float cutoff = parameterState
+        .getRawParameterValue("wavetableFilterCutoff")->load();
+    const float resonance = parameterState
+        .getRawParameterValue("wavetableFilterResonance")->load();
+    const auto cutoffFactorForRoute = [&](
+        int target, int desiredTarget, float amount,
+        const std::shared_ptr<const std::vector<float>>& values)
+    {
+        if (target != desiredTarget || values == nullptr || values->empty())
+            return 1.0f;
+        const float current = readModulation(values, modulationPhase);
+        return std::pow(2.0f, (current - 0.5f) * 8.0f * amount);
+    };
+    const float lpModulatedCutoff = cutoff
+        * cutoffFactorForRoute(
+            modulationTarget, 2, modulationAmount, modulationValues)
+        * cutoffFactorForRoute(
+            modulationTarget2, 2, modulationAmount2, modulationValues2);
+    const float safeCutoff = juce::jlimit(
+        20.0f,
+        static_cast<float>(currentSampleRate * 0.45),
+        lpModulatedCutoff);
+
+    wavetableLowPassFilter.setCutoffFrequency(safeCutoff);
+    wavetableLowPassFilter.setResonance(resonance);
+
+    auto audioBlock = juce::dsp::AudioBlock<float>(buffer);
+    auto filterContext = juce::dsp::ProcessContextReplacing<float>(audioBlock);
+    wavetableLowPassFilter.process(filterContext);
+
+    const float highPassCutoff = parameterState
+        .getRawParameterValue("wavetableHighPassCutoff")->load();
+    const float highPassResonance = parameterState
+        .getRawParameterValue("wavetableHighPassResonance")->load();
+    const float hpModulatedCutoff = highPassCutoff
+        * cutoffFactorForRoute(
+            modulationTarget, 3, modulationAmount, modulationValues)
+        * cutoffFactorForRoute(
+            modulationTarget2, 3, modulationAmount2, modulationValues2);
+    const float safeHighPassCutoff = juce::jlimit(
+        20.0f,
+        static_cast<float>(currentSampleRate * 0.45),
+        hpModulatedCutoff);
+
+    wavetableHighPassFilter.setCutoffFrequency(safeHighPassCutoff);
+    wavetableHighPassFilter.setResonance(highPassResonance);
+    wavetableHighPassFilter.process(filterContext);
 }
 
 juce::AudioProcessorValueTreeState&
@@ -800,6 +1411,270 @@ DataSonifierAudioProcessor::createParameterLayout()
 
     // Register parameters in the same order users encounter them in the UI.
     // Ableton uses registration order for its generic parameter panel.
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "engineMode", 1 },
+        "Engine",
+        juce::StringArray{ "MIDI", "Wavetable" },
+        0));
+
+    const auto envelopeTimeAttributes =
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("s")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, value < 1.0f ? 3 : 2);
+            });
+
+    auto envelopeTimeRange = juce::NormalisableRange<float>{
+        0.001f, 5.0f, 0.001f };
+    envelopeTimeRange.setSkewForCentre(0.25f);
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableAttack", 1 },
+        "Wavetable Attack",
+        envelopeTimeRange,
+        0.01f,
+        envelopeTimeAttributes));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableDecay", 1 },
+        "Wavetable Decay",
+        envelopeTimeRange,
+        0.15f,
+        envelopeTimeAttributes));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableSustain", 1 },
+        "Wavetable Sustain",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
+        0.8f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableRelease", 1 },
+        "Wavetable Release",
+        envelopeTimeRange,
+        0.25f,
+        envelopeTimeAttributes));
+
+    auto cutoffRange = juce::NormalisableRange<float>{
+        20.0f, 20000.0f, 1.0f };
+    cutoffRange.setSkewForCentre(1000.0f);
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableFilterCutoff", 1 },
+        "Wavetable LP Cutoff",
+        cutoffRange,
+        20000.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("Hz")
+            .withStringFromValueFunction([](float value, int)
+            {
+                if (value >= 1000.0f)
+                    return juce::String(value / 1000.0f, 2) + " kHz";
+
+                return juce::String(std::round(value)) + " Hz";
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableFilterResonance", 1 },
+        "Wavetable LP Resonance",
+        juce::NormalisableRange<float>{ 0.1f, 10.0f, 0.01f },
+        0.707f,
+        juce::AudioParameterFloatAttributes{}
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 2);
+            })));
+
+    auto highPassRange = juce::NormalisableRange<float>{
+        20.0f, 20000.0f, 1.0f };
+    highPassRange.setSkewForCentre(500.0f);
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableHighPassCutoff", 1 },
+        "Wavetable HP Cutoff",
+        highPassRange,
+        20.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("Hz")
+            .withStringFromValueFunction([](float value, int)
+            {
+                if (value >= 1000.0f)
+                    return juce::String(value / 1000.0f, 2) + " kHz";
+
+                return juce::String(std::round(value)) + " Hz";
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableHighPassResonance", 1 },
+        "Wavetable HP Resonance",
+        juce::NormalisableRange<float>{ 0.1f, 10.0f, 0.01f },
+        0.707f,
+        juce::AudioParameterFloatAttributes{}
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 2);
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{ "wavetableNormalize", 1 },
+        "Wavetable Normalize",
+        true));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "wavetableLoopSmoothing", 1 },
+        "Wavetable Loop Smoothing",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
+        1.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "modulationTarget", 1 },
+        "Data Modulation Target",
+        juce::StringArray{
+            "Off", "Amplitude", "LP Cutoff", "HP Cutoff" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "modulationAmount", 1 },
+        "Data Modulation Amount",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
+        0.5f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "modulationTarget2", 1 },
+        "Data Modulation 2 Target",
+        juce::StringArray{
+            "Off", "Amplitude", "LP Cutoff", "HP Cutoff" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "modulationAmount2", 1 },
+        "Data Modulation 2 Amount",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
+        0.5f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "modulationTimingMode", 1 },
+        "Data Modulation Timing",
+        juce::StringArray{ "Free", "Sync" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "modulationRate", 1 },
+        "Data Modulation Rate",
+        juce::NormalisableRange<float>{ 0.25f, 16.0f, 0.25f },
+        2.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("value/s")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(value, 2);
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "modulationSubdivision", 1 },
+        "Data Modulation Division",
+        juce::StringArray{
+            "1/1", "1/2", "1/4", "1/8", "1/16",
+            "1/4T", "1/8T", "1/16T" },
+        2));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "cycleMethod", 1 },
+        "Cycle Detection Method",
+        juce::StringArray{
+            "Mean Crossing", "HP Filter", "Baxter-King",
+            "Christiano-Fitzgerald", "Hamilton Regression",
+            "Manual Selection" },
+        0));
+
+    auto hpLambdaRange = juce::NormalisableRange<float>{
+        1.0f, 129600.0f, 1.0f };
+    hpLambdaRange.setSkewForCentre(1600.0f);
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "hpLambda", 1 },
+        "HP Lambda",
+        hpLambdaRange,
+        1600.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "bkLowPeriod", 1 },
+        "BK Shortest Period",
+        juce::NormalisableRange<float>{ 2.0f, 32.0f, 1.0f },
+        6.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "bkHighPeriod", 1 },
+        "BK Longest Period",
+        juce::NormalisableRange<float>{ 3.0f, 128.0f, 1.0f },
+        32.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "bkTruncation", 1 },
+        "BK Lead Lag Length",
+        1, 48, 12));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "cfLowPeriod", 1 },
+        "CF Shortest Period",
+        juce::NormalisableRange<float>{ 2.0f, 32.0f, 1.0f },
+        6.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "cfHighPeriod", 1 },
+        "CF Longest Period",
+        juce::NormalisableRange<float>{ 3.0f, 128.0f, 1.0f },
+        32.0f));
+
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{ "cfRemoveDrift", 1 },
+        "CF Remove Drift",
+        true));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "hamiltonHorizon", 1 },
+        "Hamilton Forecast Horizon",
+        1, 32, 8));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "hamiltonLags", 1 },
+        "Hamilton Lag Count",
+        1, 16, 4));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "cycleMinLength", 1 },
+        "Cycle Minimum Length",
+        2, 128, 8));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "cycleSensitivity", 1 },
+        "Cycle Sensitivity",
+        juce::NormalisableRange<float>{ 0.0f, 100.0f, 1.0f },
+        10.0f,
+        juce::AudioParameterFloatAttributes{}.withLabel("%")));
+
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "outputMode", 1 },
         "Output Mode",

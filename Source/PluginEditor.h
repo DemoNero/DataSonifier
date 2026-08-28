@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <functional>
 
 class HardwareLookAndFeel : public juce::LookAndFeel_V4
 {
@@ -212,6 +213,11 @@ public:
 class SeriesGraphComponent : public juce::Component
 {
 public:
+    void setIndexClickHandler(std::function<void(int)> handler)
+    {
+        indexClickHandler = std::move(handler);
+    }
+
     void setValues(const std::vector<double>& newValues)
     {
         values = newValues;
@@ -230,6 +236,26 @@ public:
             return;
 
         playbackIndex = newIndex;
+        repaint();
+    }
+
+    void setHighlightRange(int startIndex, int endIndex)
+    {
+        highlightStart = startIndex;
+        highlightEnd = endIndex;
+        repaint();
+    }
+
+    void setCycleRanges(
+        const std::vector<std::pair<int, int>>& newCycleRanges)
+    {
+        cycleRanges = newCycleRanges;
+        repaint();
+    }
+
+    void setSelectionAnchor(int index)
+    {
+        selectionAnchor = index;
         repaint();
     }
 
@@ -349,6 +375,30 @@ public:
             }
         }
 
+        // Show every detected cycle as a quiet amber region. The selected
+        // cycle receives its stronger overlay and trace below.
+        for (const auto& [cycleStart, cycleEnd] : cycleRanges)
+        {
+            if (cycleStart < 0 || cycleEnd <= cycleStart
+                || cycleEnd >= static_cast<int>(values.size())
+                || (cycleStart == highlightStart
+                    && cycleEnd == highlightEnd))
+                continue;
+
+            const float startX = juce::jmap(
+                static_cast<float>(cycleStart), 0.0f,
+                static_cast<float>(values.size() - 1),
+                bounds.getX(), bounds.getRight());
+            const float endX = juce::jmap(
+                static_cast<float>(cycleEnd), 0.0f,
+                static_cast<float>(values.size() - 1),
+                bounds.getX(), bounds.getRight());
+
+            g.setColour(juce::Colour(0xffe19a4f).withAlpha(0.085f));
+            g.fillRect(juce::Rectangle<float>(
+                startX, bounds.getY(), endX - startX, bounds.getHeight()));
+        }
+
         g.setColour(juce::Colour(0xff73cdbd));
         g.setFont(16.0f);
 
@@ -364,6 +414,117 @@ public:
         g.strokePath(graphPath, juce::PathStrokeType(2.0f,
             juce::PathStrokeType::curved,
             juce::PathStrokeType::rounded));
+
+        // Give every non-selected cycle a subdued amber trace as well as its
+        // background band. This keeps all found regions legible while the
+        // selected cycle below remains the strongest visual element.
+        for (const auto& [cycleStart, cycleEnd] : cycleRanges)
+        {
+            if (cycleStart < 0 || cycleEnd <= cycleStart
+                || cycleEnd >= static_cast<int>(values.size())
+                || (cycleStart == highlightStart
+                    && cycleEnd == highlightEnd))
+                continue;
+
+            juce::Path cyclePath;
+            bool drawingCycle = false;
+
+            for (int i = cycleStart; i <= cycleEnd; ++i)
+            {
+                if (!std::isfinite(values[i]))
+                {
+                    drawingCycle = false;
+                    continue;
+                }
+
+                const float x = juce::jmap(
+                    static_cast<float>(i), 0.0f,
+                    static_cast<float>(values.size() - 1),
+                    bounds.getX(), bounds.getRight());
+                const float y = juce::jmap(
+                    static_cast<float>(values[i]),
+                    static_cast<float>(minimum),
+                    static_cast<float>(maximum),
+                    bounds.getBottom(), bounds.getY());
+
+                if (!drawingCycle)
+                {
+                    cyclePath.startNewSubPath(x, y);
+                    drawingCycle = true;
+                }
+                else
+                    cyclePath.lineTo(x, y);
+            }
+
+            g.setColour(juce::Colour(0xffe0b060).withAlpha(0.58f));
+            g.strokePath(cyclePath, juce::PathStrokeType(
+                2.35f, juce::PathStrokeType::curved,
+                juce::PathStrokeType::rounded));
+        }
+
+        if (highlightStart >= 0 && highlightEnd > highlightStart
+            && highlightEnd < static_cast<int>(values.size()))
+        {
+            const float startX = juce::jmap(
+                static_cast<float>(highlightStart), 0.0f,
+                static_cast<float>(values.size() - 1),
+                bounds.getX(), bounds.getRight());
+            const float endX = juce::jmap(
+                static_cast<float>(highlightEnd), 0.0f,
+                static_cast<float>(values.size() - 1),
+                bounds.getX(), bounds.getRight());
+
+            g.setColour(juce::Colour(0xffd28c45).withAlpha(0.12f));
+            g.fillRect(juce::Rectangle<float>(
+                startX, bounds.getY(), endX - startX, bounds.getHeight()));
+
+            juce::Path selectedPath;
+            bool drawingSelection = false;
+            for (int i = highlightStart; i <= highlightEnd; ++i)
+            {
+                if (!std::isfinite(values[i]))
+                {
+                    drawingSelection = false;
+                    continue;
+                }
+
+                const float x = juce::jmap(
+                    static_cast<float>(i), 0.0f,
+                    static_cast<float>(values.size() - 1),
+                    bounds.getX(), bounds.getRight());
+                const float y = juce::jmap(
+                    static_cast<float>(values[i]),
+                    static_cast<float>(minimum),
+                    static_cast<float>(maximum),
+                    bounds.getBottom(), bounds.getY());
+
+                if (!drawingSelection)
+                {
+                    selectedPath.startNewSubPath(x, y);
+                    drawingSelection = true;
+                }
+                else
+                    selectedPath.lineTo(x, y);
+            }
+
+            g.setColour(juce::Colour(0xffe19a4f));
+            g.strokePath(selectedPath, juce::PathStrokeType(
+                3.5f, juce::PathStrokeType::curved,
+                juce::PathStrokeType::rounded));
+        }
+
+        if (juce::isPositiveAndBelow(
+                selectionAnchor, static_cast<int>(values.size())))
+        {
+            const float anchorX = juce::jmap(
+                static_cast<float>(selectionAnchor), 0.0f,
+                static_cast<float>(values.size() - 1),
+                bounds.getX(), bounds.getRight());
+            g.setColour(juce::Colour(0xffe19a4f));
+            g.drawVerticalLine(
+                static_cast<int>(std::round(anchorX)),
+                bounds.getY(), bounds.getBottom());
+        }
 
         if (juce::isPositiveAndBelow(
                 playbackIndex,
@@ -422,10 +583,33 @@ public:
             juce::Justification::left);
     }
 
+    void mouseDown(const juce::MouseEvent& event) override
+    {
+        if (values.size() < 2 || !indexClickHandler)
+            return;
+
+        auto plot = getLocalBounds().toFloat().reduced(10.0f);
+        plot.removeFromTop(40.0f);
+        plot.removeFromBottom(15.0f);
+        const float clampedX = juce::jlimit(
+            plot.getX(), plot.getRight(), event.position.x);
+        const int index = juce::jlimit(0,
+            static_cast<int>(values.size()) - 1,
+            static_cast<int>(std::round(juce::jmap(
+                clampedX, plot.getX(), plot.getRight(), 0.0f,
+                static_cast<float>(values.size() - 1)))));
+        indexClickHandler(index);
+    }
+
 private:
     std::vector<double> values;
     juce::String title;
     int playbackIndex = -1;
+    int highlightStart = -1;
+    int highlightEnd = -1;
+    int selectionAnchor = -1;
+    std::vector<std::pair<int, int>> cycleRanges;
+    std::function<void(int)> indexClickHandler;
 };
 
 class DataSonifierAudioProcessorEditor  : public juce::AudioProcessorEditor, 
@@ -460,6 +644,13 @@ public:
 
 private:
     void timerCallback() override;
+    void detectCycles();
+    bool rebuildCycleAnalysisSeries();
+    void selectCycle(int cycleIndex);
+    void updateCycleDisplay();
+    void updateEngineVisibility();
+    void updateModulationRouteControls();
+    void handleManualSelectionPoint(int index);
 
     // This reference is provided as a quick way for your editor to
     // access the processor object that created it.
@@ -468,6 +659,138 @@ private:
     HardwareLookAndFeel hardwareLookAndFeel;
 
     juce::TextButton openCsvButton{ "Open CSV" };
+    juce::ComboBox engineModeSelector;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        engineModeAttachment;
+    juce::Slider cycleMinimumLengthSlider;
+    juce::Slider cycleSensitivitySlider;
+    juce::ComboBox cycleDetectionMethodSelector;
+    juce::Slider hpLambdaSlider;
+    juce::Slider bkLowPeriodSlider;
+    juce::Slider bkHighPeriodSlider;
+    juce::Slider bkTruncationSlider;
+    juce::Slider cfLowPeriodSlider;
+    juce::Slider cfHighPeriodSlider;
+    juce::TextButton cfRemoveDriftButton{ "REMOVE DRIFT" };
+    juce::Slider hamiltonHorizonSlider;
+    juce::Slider hamiltonLagsSlider;
+    juce::Label cycleMinimumLengthLabel;
+    juce::Label cycleSensitivityLabel;
+    juce::Label cycleDetectionMethodLabel;
+    juce::Label hpLambdaLabel;
+    juce::Label bkLowPeriodLabel;
+    juce::Label bkHighPeriodLabel;
+    juce::Label bkTruncationLabel;
+    juce::Label cfLowPeriodLabel;
+    juce::Label cfHighPeriodLabel;
+    juce::Label cfDriftLabel;
+    juce::Label hamiltonHorizonLabel;
+    juce::Label hamiltonLagsLabel;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        cycleDetectionMethodAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        hpLambdaAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        bkLowPeriodAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        bkHighPeriodAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        bkTruncationAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        cfLowPeriodAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        cfHighPeriodAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
+        cfRemoveDriftAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        hamiltonHorizonAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        hamiltonLagsAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        cycleMinimumLengthAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        cycleSensitivityAttachment;
+    juce::TextButton findCyclesButton{ "FIND CYCLES" };
+    juce::TextButton useFullSeriesButton{ "USE FULL SERIES" };
+    juce::TextButton previousCycleButton{ "<" };
+    juce::TextButton nextCycleButton{ ">" };
+    juce::TextButton auditionCycleButton{ "AUDITION C3" };
+    juce::TextButton seriesViewButton{ "SERIES" };
+    juce::TextButton wavetableViewButton{ "WAVETABLE" };
+    juce::TextButton wavetableNormaliseButton{ "ON" };
+    juce::TextButton wavetableNormaliseOffButton{ "OFF" };
+    juce::Label wavetableLoopSmoothingLabel;
+    juce::Slider wavetableLoopSmoothingSlider;
+    juce::Label wavetableAttackLabel;
+    juce::Label wavetableDecayLabel;
+    juce::Label wavetableSustainLabel;
+    juce::Label wavetableReleaseLabel;
+    juce::Label wavetableFilterCutoffLabel;
+    juce::Label wavetableFilterResonanceLabel;
+    juce::Label wavetableHighPassCutoffLabel;
+    juce::Label wavetableHighPassResonanceLabel;
+    juce::Slider wavetableAttackSlider;
+    juce::Slider wavetableDecaySlider;
+    juce::Slider wavetableSustainSlider;
+    juce::Slider wavetableReleaseSlider;
+    juce::Slider wavetableFilterCutoffSlider;
+    juce::Slider wavetableFilterResonanceSlider;
+    juce::Slider wavetableHighPassCutoffSlider;
+    juce::Slider wavetableHighPassResonanceSlider;
+    juce::TextButton shapingViewButton{ "SHAPING" };
+    juce::TextButton modulationViewButton{ "MODULATION" };
+    juce::TextButton modulationRoute1Button{ "ROUTE 1" };
+    juce::TextButton modulationRoute2Button{ "ROUTE 2" };
+    juce::Label modulationSourceLabel;
+    juce::ComboBox modulationSourceSelector;
+    juce::Label modulationTargetLabel;
+    juce::ComboBox modulationTargetSelector;
+    juce::Label modulationAmountLabel;
+    juce::Slider modulationAmountSlider;
+    juce::Label modulationTimingLabel;
+    juce::ComboBox modulationTimingSelector;
+    juce::Label modulationRateLabel;
+    juce::Slider modulationRateSlider;
+    juce::Label modulationDivisionLabel;
+    juce::ComboBox modulationDivisionSelector;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        modulationTargetAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        modulationAmountAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        modulationTimingAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        modulationRateAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        modulationDivisionAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableAttackAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableDecayAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableSustainAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableReleaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableFilterCutoffAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableFilterResonanceAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableHighPassCutoffAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableHighPassResonanceAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        wavetableLoopSmoothingAttachment;
+    juce::Label cycleStatusLabel;
+    std::vector<std::pair<int, int>> detectedCycles;
+    std::vector<double> cycleAnalysisSeries;
+    int selectedCycle = -1;
+    bool usingFullSeries = false;
+    bool showingWavetable = false;
+    bool showingModulation = false;
+    int selectedModulationRoute = 0;
+    int manualSelectionStart = -1;
+    int lastEngineMode = -1;
     std::unique_ptr<juce::FileChooser> fileChooser;
 
     std::vector<juce::StringArray> csvData;
@@ -481,6 +804,7 @@ private:
     juce::Label selectedCellLabel;
     int selectedRow = -1;
     int selectedColumn = -1;
+    int currentDateColumn = -1;
 
     juce::ComboBox transformSelector;
     juce::TextButton transformNoneButton{ "RAW" };

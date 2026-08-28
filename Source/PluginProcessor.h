@@ -13,7 +13,9 @@
 //==============================================================================
 /**
 */
-class DataSonifierAudioProcessor  : public juce::AudioProcessor
+class DataSonifierAudioProcessor  : public juce::AudioProcessor,
+                                    private juce::AudioProcessorValueTreeState::Listener,
+                                    private juce::AsyncUpdater
 {
 public:
     struct DataStateSnapshot
@@ -28,6 +30,8 @@ public:
         int dateRangeStartRow = -1;
         int dateRangeEndRow = -1;
         juce::StringArray dateValues;
+        int modulationColumn = -1;
+        int modulationColumn2 = -1;
     };
 
     //==============================================================================
@@ -72,7 +76,13 @@ public:
     void setSelectedTransform(int transformId);
     void setDateColumn(int columnId);
     void setDateRange(int startRow, int endRow);
+    void setModulationColumn(int columnId);
+    void setModulationColumn2(int columnId);
+    void setWavetableCycleRange(int startIndex, int endIndex);
+    void setWavetableSource(const std::vector<double>& source);
+    void auditionWavetable();
     DataStateSnapshot getDataStateSnapshot() const;
+    std::vector<double> getWavetableSnapshot() const;
 
     juce::AudioProcessorValueTreeState& getParameterState() noexcept;
     int getCurrentPlaybackIndex() const noexcept;
@@ -80,7 +90,15 @@ public:
 private:
     //==============================================================================
     void rebuildProcessedSeries();
+    void rebuildModulationSeries();
     void rebuildNormalisedMidiSeries(const std::vector<double>& series);
+    void rebuildWavetable(const std::vector<double>& series);
+    void processWavetableSynth(
+        juce::AudioBuffer<float>& buffer,
+        juce::MidiBuffer& midiMessages);
+    void parameterChanged(
+        const juce::String& parameterID, float newValue) override;
+    void handleAsyncUpdate() override;
     static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
     juce::AudioProcessorValueTreeState parameterState;
@@ -96,8 +114,33 @@ private:
     int dateColumn = -1;
     int dateRangeStartRow = -1;
     int dateRangeEndRow = -1;
+    int modulationColumn = -1;
+    int modulationColumn2 = -1;
 
     std::shared_ptr<const std::vector<float>> normalisedMidiSeries;
+    std::shared_ptr<const std::vector<float>> normalisedModulationSeries;
+    std::shared_ptr<const std::vector<float>> normalisedModulationSeries2;
+    std::atomic<int> modulationCycleStart{ 0 };
+    std::atomic<int> modulationCycleEnd{ -1 };
+    std::shared_ptr<const std::vector<float>> wavetable;
+    std::shared_ptr<const std::vector<float>> activeWavetable;
+    std::shared_ptr<const std::vector<float>> previousWavetable;
+    int wavetableCrossfadeSamplesRemaining = 0;
+    int wavetableCrossfadeLengthSamples = 1;
+    mutable juce::CriticalSection wavetableSourceLock;
+    juce::CriticalSection wavetableBuildLock;
+    std::vector<double> currentWavetableSource;
+
+    double wavetablePhase = 0.0;
+    double modulationPhase = 0.0;
+    int wavetableNote = 48;
+    float wavetableVelocity = 0.0f;
+    bool wavetableKeyDown = false;
+    bool auditionEnvelopeActive = false;
+    juce::ADSR wavetableEnvelope;
+    juce::dsp::StateVariableTPTFilter<float> wavetableLowPassFilter;
+    juce::dsp::StateVariableTPTFilter<float> wavetableHighPassFilter;
+    std::atomic<int> auditionSamplesRemaining{ 0 };
 
     size_t currentSeriesIndex = 0;
     std::atomic<int> currentPlaybackIndex{ -1 };
