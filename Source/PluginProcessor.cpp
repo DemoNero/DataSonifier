@@ -49,6 +49,16 @@ DataSonifierAudioProcessor::DataSonifierAudioProcessor()
     parameterState.addParameterListener("wavetableNormalize", this);
     parameterState.addParameterListener("wavetableLoopSmoothing", this);
     parameterState.addParameterListener("wavetablePosition", this);
+    parameterState.addParameterListener("additivePartialCount", this);
+    parameterState.addParameterListener("additiveOddEven", this);
+    parameterState.addParameterListener("additiveTilt", this);
+    parameterState.addParameterListener("additiveSpread", this);
+    parameterState.addParameterListener("additiveRandomPhase", this);
+    parameterState.addParameterListener("additiveMorph", this);
+    parameterState.addParameterListener("additiveMorphAuto", this);
+    parameterState.addParameterListener("additiveMorphTiming", this);
+    parameterState.addParameterListener("additiveMorphRate", this);
+    parameterState.addParameterListener("additiveMorphDivision", this);
 }
 
 DataSonifierAudioProcessor::~DataSonifierAudioProcessor()
@@ -57,6 +67,16 @@ DataSonifierAudioProcessor::~DataSonifierAudioProcessor()
     parameterState.removeParameterListener("wavetableNormalize", this);
     parameterState.removeParameterListener("wavetableLoopSmoothing", this);
     parameterState.removeParameterListener("wavetablePosition", this);
+    parameterState.removeParameterListener("additivePartialCount", this);
+    parameterState.removeParameterListener("additiveOddEven", this);
+    parameterState.removeParameterListener("additiveTilt", this);
+    parameterState.removeParameterListener("additiveSpread", this);
+    parameterState.removeParameterListener("additiveRandomPhase", this);
+    parameterState.removeParameterListener("additiveMorph", this);
+    parameterState.removeParameterListener("additiveMorphAuto", this);
+    parameterState.removeParameterListener("additiveMorphTiming", this);
+    parameterState.removeParameterListener("additiveMorphRate", this);
+    parameterState.removeParameterListener("additiveMorphDivision", this);
 }
 
 //==============================================================================
@@ -137,6 +157,15 @@ void DataSonifierAudioProcessor::prepareToPlay(
     currentPlaybackIndex.store(-1);
     wasTransportPlaying = false;
     wavetablePhase = 0.0;
+    additivePhase = 0.0;
+    activeAdditivePartials.reset();
+    previousAdditivePartials.reset();
+    additiveCrossfadeSamplesRemaining = 0;
+    additiveCrossfadeLengthSamples = juce::jmax(
+        1, static_cast<int>(sampleRate * 0.02));
+    additiveAutoMorphPhase = 0.0;
+    additiveAutoMorphValue.store(0.0f);
+    additiveAutoMorphUpdateCountdown = 0;
     modulationPhase = 0.0;
     activeWavetable.reset();
     previousWavetable.reset();
@@ -241,6 +270,11 @@ void DataSonifierAudioProcessor::processBlock (juce::AudioBuffer<float>& buffer,
     if (engineMode == 1)
     {
         processWavetableSynth(buffer, midiMessages);
+        return;
+    }
+    if (engineMode == 2)
+    {
+        processAdditiveSynth(buffer, midiMessages);
         return;
     }
 
@@ -523,7 +557,13 @@ void DataSonifierAudioProcessor::setStateInformation (const void* data, int size
     if (auto xml = getXmlFromBinary(data, sizeInBytes))
     {
         if (xml->hasTagName(parameterState.state.getType()))
+        {
             parameterState.replaceState(juce::ValueTree::fromXml(*xml));
+            loadAdditiveEditsFromState();
+            loadAdditiveMorphSourcesFromState();
+            wavetableRebuildPending.store(true);
+            triggerAsyncUpdate();
+        }
     }
 }
 
@@ -815,6 +855,48 @@ DataSonifierAudioProcessor::getWavetableSnapshot() const
         return {};
 
     return std::vector<double>(table->begin(), table->end());
+}
+
+std::vector<DataSonifierAudioProcessor::AdditivePartial>
+DataSonifierAudioProcessor::getAdditivePartialsSnapshot() const
+{
+    const auto partials = std::atomic_load(&additivePartials);
+    if (partials == nullptr)
+        return {};
+
+    return *partials;
+}
+
+float DataSonifierAudioProcessor::getAdditivePartialLevel(int index) const
+{
+    const juce::ScopedLock editLock(additiveEditLock);
+    if (!juce::isPositiveAndBelow(
+            index, static_cast<int>(additiveBasePartials.size())))
+        return 1.0f;
+    const auto& base = additiveBasePartials[static_cast<size_t>(index)];
+    const auto edit = additiveEdits.find(base.sourceBin);
+    return edit == additiveEdits.end() ? 1.0f : edit->second.level;
+}
+
+float DataSonifierAudioProcessor::getAdditivePartialBaseRatio(int index) const
+{
+    const juce::ScopedLock editLock(additiveEditLock);
+    if (!juce::isPositiveAndBelow(
+            index, static_cast<int>(additiveBasePartials.size())))
+        return 1.0f;
+    return additiveBasePartials[static_cast<size_t>(index)].frequencyRatio;
+}
+
+float DataSonifierAudioProcessor::getAdditivePartialRatio(int index) const
+{
+    const juce::ScopedLock editLock(additiveEditLock);
+    if (!juce::isPositiveAndBelow(
+            index, static_cast<int>(additiveBasePartials.size())))
+        return 1.0f;
+    const auto& base = additiveBasePartials[static_cast<size_t>(index)];
+    const auto edit = additiveEdits.find(base.sourceBin);
+    return edit == additiveEdits.end()
+        ? base.frequencyRatio : edit->second.ratio;
 }
 
 void DataSonifierAudioProcessor::rebuildProcessedSeries()
@@ -1114,6 +1196,8 @@ void DataSonifierAudioProcessor::rebuildWavetable(
     std::atomic_store(
         &wavetable,
         std::shared_ptr<const std::vector<float>>(table));
+
+    rebuildAdditivePartials(series);
 }
 
 void DataSonifierAudioProcessor::rebuildMorphedWavetable()
@@ -1192,14 +1276,38 @@ void DataSonifierAudioProcessor::parameterChanged(
 {
     juce::ignoreUnused(newValue);
 
+    if (parameterID == "additiveOddEven"
+        || parameterID == "additiveTilt"
+        || parameterID == "additiveSpread"
+        || parameterID == "additiveRandomPhase"
+        || parameterID == "additiveMorph"
+        || parameterID == "additiveMorphAuto"
+        || parameterID == "additiveMorphTiming"
+        || parameterID == "additiveMorphRate"
+        || parameterID == "additiveMorphDivision")
+    {
+        additiveShapingUpdatePending.store(true);
+        triggerAsyncUpdate();
+        return;
+    }
+
     if (parameterID == "wavetableNormalize"
         || parameterID == "wavetableLoopSmoothing"
-        || parameterID == "wavetablePosition")
+        || parameterID == "wavetablePosition"
+        || parameterID == "additivePartialCount")
+    {
+        wavetableRebuildPending.store(true);
         triggerAsyncUpdate();
+    }
 }
 
 void DataSonifierAudioProcessor::handleAsyncUpdate()
 {
+    if (additiveShapingUpdatePending.exchange(false))
+        publishEditedAdditivePartials();
+    if (!wavetableRebuildPending.exchange(false))
+        return;
+
     bool hasFrames = false;
     std::vector<double> source;
     {
@@ -1213,6 +1321,673 @@ void DataSonifierAudioProcessor::handleAsyncUpdate()
         rebuildMorphedWavetable();
     else
         rebuildWavetable(source);
+}
+
+void DataSonifierAudioProcessor::rebuildAdditivePartials(
+    const std::vector<double>& series)
+{
+    constexpr int fftOrder = 11;
+    constexpr int fftSize = 1 << fftOrder;
+    const int maximumPartialCount = juce::jlimit(1, 32,
+        static_cast<int>(std::round(parameterState
+            .getRawParameterValue("additivePartialCount")->load())));
+
+    std::vector<float> source;
+    source.reserve(series.size());
+    double sum = 0.0;
+    for (const double value : series)
+    {
+        if (!std::isfinite(value))
+            continue;
+        source.push_back(static_cast<float>(value));
+        sum += value;
+    }
+
+    auto result = std::make_shared<std::vector<AdditivePartial>>();
+    if (source.size() < 2)
+    {
+        std::atomic_store(&additivePartials,
+            std::shared_ptr<const std::vector<AdditivePartial>>(result));
+        return;
+    }
+
+    const float mean = static_cast<float>(sum / source.size());
+    for (auto& value : source)
+        value -= mean;
+
+    std::vector<float> fftData(static_cast<size_t>(fftSize * 2), 0.0f);
+    std::vector<float> resampledSource(static_cast<size_t>(fftSize), 0.0f);
+    const double sourceScale = static_cast<double>(source.size() - 1)
+        / static_cast<double>(fftSize - 1);
+    for (int index = 0; index < fftSize; ++index)
+    {
+        const double sourcePosition = index * sourceScale;
+        const size_t indexA = static_cast<size_t>(sourcePosition);
+        const size_t indexB = std::min(indexA + 1, source.size() - 1);
+        const float fraction = static_cast<float>(
+            sourcePosition - static_cast<double>(indexA));
+        const float sample = juce::jmap(
+            fraction, source[indexA], source[indexB]);
+        resampledSource[static_cast<size_t>(index)] = sample;
+        const float hann = 0.5f - 0.5f * std::cos(
+            juce::MathConstants<float>::twoPi
+            * static_cast<float>(index)
+            / static_cast<float>(fftSize - 1));
+        fftData[static_cast<size_t>(index)] = sample * hann;
+    }
+
+    juce::dsp::FFT fft(fftOrder);
+    fft.performRealOnlyForwardTransform(fftData.data());
+
+    std::vector<AdditivePartial> candidates;
+    candidates.reserve(static_cast<size_t>(fftSize / 2 - 1));
+    for (int bin = 1; bin < fftSize / 2; ++bin)
+    {
+        const float real = fftData[static_cast<size_t>(2 * bin)];
+        const float imaginary = fftData[static_cast<size_t>(2 * bin + 1)];
+        const float magnitude = std::hypot(real, imaginary);
+        if (!std::isfinite(magnitude) || magnitude <= 0.0f)
+            continue;
+
+        candidates.push_back({
+            bin,
+            static_cast<float>(bin),
+            magnitude,
+            std::atan2(-imaginary, real)
+        });
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const AdditivePartial& left, const AdditivePartial& right)
+        {
+            return left.amplitude > right.amplitude;
+        });
+    if (candidates.size() > maximumPartialCount)
+        candidates.resize(maximumPartialCount);
+
+    // Match the oscillator bank's RMS to the peak-normalized source cycle.
+    // Summing partial magnitudes is safe but perceptually too quiet because
+    // their phases cancel over the cycle.
+    float sourcePeak = 0.0f;
+    double sourceEnergy = 0.0;
+    for (const float sample : resampledSource)
+    {
+        sourcePeak = std::max(sourcePeak, std::abs(sample));
+        sourceEnergy += static_cast<double>(sample) * sample;
+    }
+    const double targetRms = sourcePeak > 0.0f
+        ? std::sqrt(sourceEnergy / fftSize) / sourcePeak
+        : 0.0;
+
+    double reconstructedEnergy = 0.0;
+    for (int sample = 0; sample < fftSize; ++sample)
+    {
+        const double phasePosition = static_cast<double>(sample) / fftSize;
+        double reconstructed = 0.0;
+        for (const auto& partial : candidates)
+            reconstructed += partial.amplitude * std::cos(
+                juce::MathConstants<double>::twoPi
+                    * phasePosition * partial.frequencyRatio
+                + partial.phase);
+        reconstructedEnergy += reconstructed * reconstructed;
+    }
+    const double reconstructedRms = std::sqrt(
+        reconstructedEnergy / fftSize);
+    if (targetRms > 0.0 && reconstructedRms > 0.0)
+    {
+        const float rmsScale = static_cast<float>(targetRms / reconstructedRms);
+        for (auto& partial : candidates)
+            partial.amplitude *= rmsScale;
+    }
+
+    std::sort(candidates.begin(), candidates.end(),
+        [](const AdditivePartial& left, const AdditivePartial& right)
+        {
+            return left.frequencyRatio < right.frequencyRatio;
+        });
+
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        additiveBasePartials = candidates;
+    }
+    publishEditedAdditivePartials();
+}
+
+std::vector<DataSonifierAudioProcessor::AdditivePartial>
+DataSonifierAudioProcessor::buildEditedAdditiveBaseLocked() const
+{
+    auto applyEdits = [this](std::vector<AdditivePartial> partials)
+    {
+        for (auto& partial : partials)
+        {
+            const auto edit = additiveEdits.find(partial.sourceBin);
+            if (edit == additiveEdits.end())
+                continue;
+            partial.amplitude *= edit->second.level;
+            partial.frequencyRatio = edit->second.ratio;
+        }
+        return partials;
+    };
+
+    if (additiveMorphSourceA.empty() || additiveMorphSourceB.empty())
+        return applyEdits(additiveBasePartials);
+
+    const bool autoMorph = parameterState
+        .getRawParameterValue("additiveMorphAuto")->load() >= 0.5f;
+    const float morph = autoMorph
+        ? additiveAutoMorphValue.load()
+        : parameterState.getRawParameterValue("additiveMorph")->load();
+    std::map<int, AdditivePartial> sourceA;
+    std::map<int, AdditivePartial> sourceB;
+    for (const auto& partial : additiveMorphSourceA)
+        sourceA[partial.sourceBin] = partial;
+    for (const auto& partial : additiveMorphSourceB)
+        sourceB[partial.sourceBin] = partial;
+
+    std::vector<AdditivePartial> result;
+    result.reserve(sourceA.size() + sourceB.size());
+    std::map<int, bool> bins;
+    for (const auto& [bin, partial] : sourceA)
+        bins[bin] = true;
+    for (const auto& [bin, partial] : sourceB)
+        bins[bin] = true;
+
+    for (const auto& [bin, unused] : bins)
+    {
+        juce::ignoreUnused(unused);
+        const auto foundA = sourceA.find(bin);
+        const auto foundB = sourceB.find(bin);
+        const bool hasA = foundA != sourceA.end();
+        const bool hasB = foundB != sourceB.end();
+        const auto& a = hasA ? foundA->second : foundB->second;
+        const auto& b = hasB ? foundB->second : foundA->second;
+        AdditivePartial partial;
+        partial.sourceBin = bin;
+        partial.frequencyRatio = juce::jmap(
+            morph, a.frequencyRatio, b.frequencyRatio);
+        const float amplitudeA = hasA ? a.amplitude : 0.0f;
+        const float amplitudeB = hasB ? b.amplitude : 0.0f;
+        partial.amplitude = juce::jmap(morph, amplitudeA, amplitudeB);
+        const float phaseDelta = std::remainder(
+            b.phase - a.phase, juce::MathConstants<float>::twoPi);
+        partial.phase = a.phase + phaseDelta * morph;
+        result.push_back(partial);
+    }
+    return applyEdits(std::move(result));
+}
+
+void DataSonifierAudioProcessor::publishEditedAdditivePartials()
+{
+    auto edited = std::make_shared<std::vector<AdditivePartial>>();
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        *edited = buildEditedAdditiveBaseLocked();
+    }
+    applyGlobalAdditiveShaping(*edited);
+    std::atomic_store(&additivePartials,
+        std::shared_ptr<const std::vector<AdditivePartial>>(edited));
+}
+
+void DataSonifierAudioProcessor::applyGlobalAdditiveShaping(
+    std::vector<AdditivePartial>& partials) const
+{
+    const float balance = parameterState
+        .getRawParameterValue("additiveOddEven")->load();
+    const float tilt = parameterState
+        .getRawParameterValue("additiveTilt")->load();
+    const float spread = parameterState
+        .getRawParameterValue("additiveSpread")->load();
+    const float randomPhase = parameterState
+        .getRawParameterValue("additiveRandomPhase")->load();
+
+    for (auto& partial : partials)
+    {
+        const bool even = (partial.sourceBin % 2) == 0;
+        if (balance > 0.0f && !even)
+            partial.amplitude *= 1.0f - balance;
+        else if (balance < 0.0f && even)
+            partial.amplitude *= 1.0f + balance;
+
+        const float safeRatio = juce::jmax(0.25f, partial.frequencyRatio);
+        const float octaves = std::log2(safeRatio);
+        partial.amplitude *= juce::Decibels::decibelsToGain(tilt * octaves);
+        partial.frequencyRatio = juce::jmax(0.25f,
+            1.0f + (partial.frequencyRatio - 1.0f) * spread);
+
+        uint32_t hash = static_cast<uint32_t>(partial.sourceBin) * 747796405u
+            + 2891336453u;
+        hash = ((hash >> ((hash >> 28u) + 4u)) ^ hash) * 277803737u;
+        hash = (hash >> 22u) ^ hash;
+        const float unit = static_cast<float>(hash)
+            / static_cast<float>(std::numeric_limits<uint32_t>::max());
+        partial.phase += randomPhase
+            * juce::jmap(unit, -juce::MathConstants<float>::pi,
+                juce::MathConstants<float>::pi);
+    }
+}
+
+void DataSonifierAudioProcessor::setAdditivePartialLevel(
+    int index, float level)
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        if (!juce::isPositiveAndBelow(
+                index, static_cast<int>(additiveBasePartials.size())))
+            return;
+        const auto& base = additiveBasePartials[static_cast<size_t>(index)];
+        auto editPosition = additiveEdits.emplace(
+            base.sourceBin, AdditiveEdit{ 1.0f, base.frequencyRatio }).first;
+        auto& edit = editPosition->second;
+        edit.level = juce::jlimit(0.0f, 2.0f, level);
+    }
+    saveAdditiveEditsToState();
+    publishEditedAdditivePartials();
+}
+
+void DataSonifierAudioProcessor::setAdditivePartialRatio(
+    int index, float ratio)
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        if (!juce::isPositiveAndBelow(
+                index, static_cast<int>(additiveBasePartials.size())))
+            return;
+        const auto& base = additiveBasePartials[static_cast<size_t>(index)];
+        auto editPosition = additiveEdits.emplace(
+            base.sourceBin, AdditiveEdit{ 1.0f, base.frequencyRatio }).first;
+        auto& edit = editPosition->second;
+        edit.ratio = juce::jlimit(0.25f, 1024.0f, ratio);
+    }
+    saveAdditiveEditsToState();
+    publishEditedAdditivePartials();
+}
+
+void DataSonifierAudioProcessor::resetAdditivePartial(int index)
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        if (!juce::isPositiveAndBelow(
+                index, static_cast<int>(additiveBasePartials.size())))
+            return;
+        additiveEdits.erase(
+            additiveBasePartials[static_cast<size_t>(index)].sourceBin);
+    }
+    saveAdditiveEditsToState();
+    publishEditedAdditivePartials();
+}
+
+void DataSonifierAudioProcessor::resetAllAdditivePartials()
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        additiveEdits.clear();
+    }
+    saveAdditiveEditsToState();
+    publishEditedAdditivePartials();
+}
+
+void DataSonifierAudioProcessor::captureAdditiveMorphSource(
+    int slot, int cycleIndex)
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        if (additiveBasePartials.empty())
+            return;
+        if (slot == 0)
+        {
+            additiveMorphSourceA = additiveBasePartials;
+            additiveMorphCycleA = cycleIndex;
+        }
+        else
+        {
+            additiveMorphSourceB = additiveBasePartials;
+            additiveMorphCycleB = cycleIndex;
+        }
+    }
+    saveAdditiveMorphSourcesToState();
+    publishEditedAdditivePartials();
+}
+
+void DataSonifierAudioProcessor::clearAdditiveMorphSources()
+{
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        additiveMorphSourceA.clear();
+        additiveMorphSourceB.clear();
+        additiveMorphCycleA = -1;
+        additiveMorphCycleB = -1;
+    }
+    saveAdditiveMorphSourcesToState();
+    publishEditedAdditivePartials();
+}
+
+int DataSonifierAudioProcessor::getAdditiveMorphCycle(int slot) const
+{
+    const juce::ScopedLock editLock(additiveEditLock);
+    return slot == 0 ? additiveMorphCycleA : additiveMorphCycleB;
+}
+
+void DataSonifierAudioProcessor::saveAdditiveMorphSourcesToState()
+{
+    const auto serialise = [](const std::vector<AdditivePartial>& partials)
+    {
+        juce::String text;
+        for (const auto& partial : partials)
+        {
+            if (text.isNotEmpty())
+                text += ";";
+            text += juce::String(partial.sourceBin) + ","
+                + juce::String(partial.frequencyRatio, 7) + ","
+                + juce::String(partial.amplitude, 7) + ","
+                + juce::String(partial.phase, 7);
+        }
+        return text;
+    };
+
+    juce::String sourceA;
+    juce::String sourceB;
+    int cycleA = -1;
+    int cycleB = -1;
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        sourceA = serialise(additiveMorphSourceA);
+        sourceB = serialise(additiveMorphSourceB);
+        cycleA = additiveMorphCycleA;
+        cycleB = additiveMorphCycleB;
+    }
+    parameterState.state.setProperty("additiveMorphSourceA", sourceA, nullptr);
+    parameterState.state.setProperty("additiveMorphSourceB", sourceB, nullptr);
+    parameterState.state.setProperty("additiveMorphCycleA", cycleA, nullptr);
+    parameterState.state.setProperty("additiveMorphCycleB", cycleB, nullptr);
+}
+
+void DataSonifierAudioProcessor::loadAdditiveMorphSourcesFromState()
+{
+    const auto parse = [](const juce::String& text)
+    {
+        std::vector<AdditivePartial> partials;
+        juce::StringArray entries;
+        entries.addTokens(text, ";", juce::String{});
+        for (const auto& entry : entries)
+        {
+            juce::StringArray fields;
+            fields.addTokens(entry, ",", juce::String{});
+            if (fields.size() != 4)
+                continue;
+            AdditivePartial partial;
+            partial.sourceBin = fields[0].getIntValue();
+            partial.frequencyRatio = static_cast<float>(fields[1].getDoubleValue());
+            partial.amplitude = static_cast<float>(fields[2].getDoubleValue());
+            partial.phase = static_cast<float>(fields[3].getDoubleValue());
+            if (partial.sourceBin > 0
+                && std::isfinite(partial.frequencyRatio)
+                && std::isfinite(partial.amplitude)
+                && std::isfinite(partial.phase))
+                partials.push_back(partial);
+        }
+        return partials;
+    };
+
+    const juce::ScopedLock editLock(additiveEditLock);
+    additiveMorphSourceA = parse(parameterState.state
+        .getProperty("additiveMorphSourceA").toString());
+    additiveMorphSourceB = parse(parameterState.state
+        .getProperty("additiveMorphSourceB").toString());
+    additiveMorphCycleA = static_cast<int>(parameterState.state
+        .getProperty("additiveMorphCycleA", -1));
+    additiveMorphCycleB = static_cast<int>(parameterState.state
+        .getProperty("additiveMorphCycleB", -1));
+}
+
+void DataSonifierAudioProcessor::saveAdditiveEditsToState()
+{
+    juce::String serialised;
+    {
+        const juce::ScopedLock editLock(additiveEditLock);
+        for (const auto& [bin, edit] : additiveEdits)
+        {
+            if (serialised.isNotEmpty())
+                serialised += ";";
+            serialised += juce::String(bin) + ":"
+                + juce::String(edit.level, 6) + ":"
+                + juce::String(edit.ratio, 6);
+        }
+    }
+    parameterState.state.setProperty(
+        "additivePartialEdits", serialised, nullptr);
+}
+
+void DataSonifierAudioProcessor::loadAdditiveEditsFromState()
+{
+    std::map<int, AdditiveEdit> restored;
+    const auto serialised = parameterState.state
+        .getProperty("additivePartialEdits").toString();
+    juce::StringArray entries;
+    entries.addTokens(serialised, ";", {});
+    for (const auto& entry : entries)
+    {
+        juce::StringArray fields;
+        fields.addTokens(entry, ":", {});
+        if (fields.size() != 3)
+            continue;
+        const int bin = fields[0].getIntValue();
+        const float level = static_cast<float>(fields[1].getDoubleValue());
+        const float ratio = static_cast<float>(fields[2].getDoubleValue());
+        if (bin > 0 && std::isfinite(level) && std::isfinite(ratio))
+            restored[bin] = {
+                juce::jlimit(0.0f, 2.0f, level),
+                juce::jlimit(0.25f, 1024.0f, ratio) };
+    }
+    const juce::ScopedLock editLock(additiveEditLock);
+    additiveEdits = std::move(restored);
+}
+
+void DataSonifierAudioProcessor::applyAdditiveOutputProcessing(
+    juce::AudioBuffer<float>& buffer)
+{
+    const float maximumCutoff = static_cast<float>(currentSampleRate * 0.45);
+    wavetableLowPassFilter.setCutoffFrequency(juce::jlimit(
+        20.0f, maximumCutoff,
+        parameterState.getRawParameterValue("wavetableFilterCutoff")->load()));
+    wavetableLowPassFilter.setResonance(parameterState
+        .getRawParameterValue("wavetableFilterResonance")->load());
+    wavetableHighPassFilter.setCutoffFrequency(juce::jlimit(
+        20.0f, maximumCutoff,
+        parameterState.getRawParameterValue("wavetableHighPassCutoff")->load()));
+    wavetableHighPassFilter.setResonance(parameterState
+        .getRawParameterValue("wavetableHighPassResonance")->load());
+
+    auto audioBlock = juce::dsp::AudioBlock<float>(buffer);
+    auto filterContext = juce::dsp::ProcessContextReplacing<float>(audioBlock);
+    wavetableLowPassFilter.process(filterContext);
+    wavetableHighPassFilter.process(filterContext);
+
+    outputGainLinear.setTargetValue(juce::Decibels::decibelsToGain(
+        parameterState.getRawParameterValue("outputGain")->load()));
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        const float gainForSample = outputGainLinear.getNextValue();
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            buffer.setSample(channel, sample,
+                buffer.getSample(channel, sample) * gainForSample);
+    }
+    outputLimiter.process(filterContext);
+}
+
+void DataSonifierAudioProcessor::advanceAdditiveAutoMorph(int numSamples)
+{
+    if (parameterState.getRawParameterValue("additiveMorphAuto")->load()
+        < 0.5f || currentSampleRate <= 0.0)
+        return;
+
+    double cyclesPerSecond = parameterState
+        .getRawParameterValue("additiveMorphRate")->load();
+    const int timing = static_cast<int>(std::round(parameterState
+        .getRawParameterValue("additiveMorphTiming")->load()));
+    if (timing == 1)
+    {
+        double hostBpm = 120.0;
+        if (auto* hostPlayHead = getPlayHead())
+            if (auto position = hostPlayHead->getPosition())
+                if (const auto bpm = position->getBpm())
+                    hostBpm = *bpm;
+        const int division = juce::jlimit(0, 7,
+            static_cast<int>(std::round(parameterState
+                .getRawParameterValue("additiveMorphDivision")->load())));
+        constexpr double quarterNoteLengths[] = {
+            4.0, 2.0, 1.0, 0.5, 0.25,
+            2.0 / 3.0, 1.0 / 3.0, 1.0 / 6.0
+        };
+        const double secondsPerCycle = (60.0 / juce::jmax(1.0, hostBpm))
+            * quarterNoteLengths[division];
+        cyclesPerSecond = 1.0 / secondsPerCycle;
+    }
+
+    additiveAutoMorphPhase += cyclesPerSecond
+        * static_cast<double>(numSamples) / currentSampleRate;
+    additiveAutoMorphPhase -= std::floor(additiveAutoMorphPhase);
+    additiveAutoMorphValue.store(static_cast<float>(
+        1.0 - std::abs(2.0 * additiveAutoMorphPhase - 1.0)));
+
+    additiveAutoMorphUpdateCountdown -= numSamples;
+    if (additiveAutoMorphUpdateCountdown <= 0)
+    {
+        additiveAutoMorphUpdateCountdown = juce::jmax(
+            1, static_cast<int>(currentSampleRate / 50.0));
+        additiveShapingUpdatePending.store(true);
+        triggerAsyncUpdate();
+    }
+}
+
+void DataSonifierAudioProcessor::processAdditiveSynth(
+    juce::AudioBuffer<float>& buffer,
+    juce::MidiBuffer& midiMessages)
+{
+    buffer.clear();
+    advanceAdditiveAutoMorph(buffer.getNumSamples());
+
+    juce::ADSR::Parameters envelopeParameters;
+    envelopeParameters.attack = parameterState
+        .getRawParameterValue("wavetableAttack")->load();
+    envelopeParameters.decay = parameterState
+        .getRawParameterValue("wavetableDecay")->load();
+    envelopeParameters.sustain = parameterState
+        .getRawParameterValue("wavetableSustain")->load();
+    envelopeParameters.release = parameterState
+        .getRawParameterValue("wavetableRelease")->load();
+    wavetableEnvelope.setParameters(envelopeParameters);
+
+    for (const auto metadata : midiMessages)
+    {
+        const auto message = metadata.getMessage();
+        if (message.isNoteOn())
+        {
+            wavetableNote = message.getNoteNumber();
+            wavetableVelocity = message.getFloatVelocity();
+            wavetableKeyDown = true;
+            auditionEnvelopeActive = false;
+            auditionSamplesRemaining.store(0);
+            additivePhase = 0.0;
+            wavetableEnvelope.noteOn();
+        }
+        else if ((message.isNoteOff()
+                    && message.getNoteNumber() == wavetableNote)
+                 || message.isAllNotesOff()
+                 || message.isAllSoundOff())
+        {
+            wavetableKeyDown = false;
+            wavetableEnvelope.noteOff();
+        }
+    }
+    midiMessages.clear();
+
+    const auto latestPartials = std::atomic_load(&additivePartials);
+    if (latestPartials != activeAdditivePartials)
+    {
+        previousAdditivePartials = activeAdditivePartials;
+        activeAdditivePartials = latestPartials;
+        additiveCrossfadeSamplesRemaining = previousAdditivePartials != nullptr
+            ? additiveCrossfadeLengthSamples : 0;
+    }
+    const auto partials = activeAdditivePartials;
+    const bool auditioning = auditionSamplesRemaining.load() > 0;
+    if (auditioning && !wavetableKeyDown && !auditionEnvelopeActive)
+    {
+        wavetableNote = 48;
+        wavetableVelocity = 0.8f;
+        auditionEnvelopeActive = true;
+        additivePhase = 0.0;
+        wavetableEnvelope.noteOn();
+    }
+
+    if (partials == nullptr || partials->empty()
+        || (!wavetableEnvelope.isActive() && !auditioning))
+        return;
+
+    const double fundamental = juce::MidiMessage::getMidiNoteInHertz(
+        wavetableNote);
+    const double phaseIncrement = fundamental / currentSampleRate;
+    // Match the wavetable engine's pre-envelope level so switching engines
+    // compares synthesis character rather than a 6 dB loudness difference.
+    const float voiceGain = 0.18f * wavetableVelocity;
+
+    const auto renderBank = [this, fundamental](
+        const std::shared_ptr<const std::vector<AdditivePartial>>& bank)
+    {
+        float value = 0.0f;
+        if (bank == nullptr)
+            return value;
+        for (const auto& partial : *bank)
+        {
+            if (fundamental * partial.frequencyRatio
+                >= currentSampleRate * 0.45)
+                continue;
+            value += partial.amplitude * std::cos(
+                juce::MathConstants<double>::twoPi
+                    * additivePhase * partial.frequencyRatio
+                + partial.phase);
+        }
+        return value;
+    };
+
+    for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
+    {
+        float oscillatorValue = renderBank(partials);
+        if (additiveCrossfadeSamplesRemaining > 0
+            && previousAdditivePartials != nullptr)
+        {
+            const float fade = 1.0f
+                - static_cast<float>(additiveCrossfadeSamplesRemaining)
+                    / static_cast<float>(additiveCrossfadeLengthSamples);
+            oscillatorValue = juce::jmap(fade,
+                renderBank(previousAdditivePartials), oscillatorValue);
+            if (--additiveCrossfadeSamplesRemaining == 0)
+                previousAdditivePartials.reset();
+        }
+
+        const float value = juce::jlimit(-1.0f, 1.0f, oscillatorValue)
+            * voiceGain * wavetableEnvelope.getNextSample();
+        for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
+            buffer.setSample(channel, sample, value);
+
+        additivePhase += phaseIncrement;
+        additivePhase -= std::floor(additivePhase);
+
+        if (auditionEnvelopeActive && !wavetableKeyDown)
+        {
+            const int remaining = auditionSamplesRemaining.load();
+            if (remaining > 1)
+                auditionSamplesRemaining.fetch_sub(1);
+            else if (remaining == 1)
+            {
+                auditionSamplesRemaining.store(0);
+                auditionEnvelopeActive = false;
+                wavetableEnvelope.noteOff();
+            }
+        }
+    }
+
+    applyAdditiveOutputProcessing(buffer);
 }
 
 void DataSonifierAudioProcessor::processWavetableSynth(
@@ -1533,7 +2308,7 @@ DataSonifierAudioProcessor::createParameterLayout()
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "engineMode", 1 },
         "Engine",
-        juce::StringArray{ "MIDI", "Wavetable" },
+        juce::StringArray{ "MIDI", "Wavetable", "Additive" },
         0));
 
     layout.add(std::make_unique<juce::AudioParameterFloat>(
@@ -1679,6 +2454,90 @@ DataSonifierAudioProcessor::createParameterLayout()
             {
                 return juce::String(std::round(value * 100.0f));
             })));
+
+    layout.add(std::make_unique<juce::AudioParameterInt>(
+        juce::ParameterID{ "additivePartialCount", 1 },
+        "Add Partial Count",
+        1, 32, 32));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveOddEven", 1 },
+        "Add Odd Even",
+        juce::NormalisableRange<float>{ -1.0f, 1.0f, 0.01f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                if (std::abs(value) < 0.005f)
+                    return juce::String("CENTER");
+                return juce::String(std::round(std::abs(value) * 100.0f))
+                    + (value < 0.0f ? " ODD" : " EVEN");
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveTilt", 1 },
+        "Add Spectral Tilt",
+        juce::NormalisableRange<float>{ -12.0f, 12.0f, 0.1f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}.withLabel("dB/oct")));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveSpread", 1 },
+        "Add Frequency Spread",
+        juce::NormalisableRange<float>{ 0.25f, 2.0f, 0.01f },
+        1.0f,
+        juce::AudioParameterFloatAttributes{}.withLabel("x")));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveRandomPhase", 1 },
+        "Add Phase Spread",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.01f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveMorph", 1 },
+        "Add Spectrum Morph",
+        juce::NormalisableRange<float>{ 0.0f, 1.0f, 0.001f },
+        0.0f,
+        juce::AudioParameterFloatAttributes{}
+            .withLabel("%")
+            .withStringFromValueFunction([](float value, int)
+            {
+                return juce::String(std::round(value * 100.0f));
+            })));
+
+    layout.add(std::make_unique<juce::AudioParameterBool>(
+        juce::ParameterID{ "additiveMorphAuto", 1 },
+        "Add Auto Morph",
+        false));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "additiveMorphTiming", 1 },
+        "Add Morph Timing",
+        juce::StringArray{ "Free", "Sync" },
+        0));
+
+    layout.add(std::make_unique<juce::AudioParameterFloat>(
+        juce::ParameterID{ "additiveMorphRate", 1 },
+        "Add Morph Rate",
+        juce::NormalisableRange<float>{ 0.02f, 4.0f, 0.01f, 0.35f },
+        0.2f,
+        juce::AudioParameterFloatAttributes{}.withLabel("Hz")));
+
+    layout.add(std::make_unique<juce::AudioParameterChoice>(
+        juce::ParameterID{ "additiveMorphDivision", 1 },
+        "Add Morph Division",
+        juce::StringArray{
+            "1/1", "1/2", "1/4", "1/8", "1/16",
+            "1/4T", "1/8T", "1/16T" },
+        2));
 
     layout.add(std::make_unique<juce::AudioParameterChoice>(
         juce::ParameterID{ "modulationTarget", 1 },

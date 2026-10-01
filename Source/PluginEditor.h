@@ -220,7 +220,21 @@ public:
 
     void setValues(const std::vector<double>& newValues)
     {
+        spectrumMode = false;
         values = newValues;
+        repaint();
+    }
+
+    void setSpectrum(
+        const std::vector<DataSonifierAudioProcessor::AdditivePartial>& newPartials,
+        int selectedIndex)
+    {
+        spectrumMode = true;
+        partials = newPartials;
+        selectedPartial = partials.empty()
+            ? -1
+            : juce::jlimit(0, static_cast<int>(partials.size()) - 1,
+                selectedIndex);
         repaint();
     }
 
@@ -288,6 +302,84 @@ public:
             bounds.getRight(),
             bounds.getBottom(),
             1.0f);
+
+        if (spectrumMode)
+        {
+            g.setColour(juce::Colour(0xff73cdbd));
+            g.setFont(16.0f);
+            g.drawText(title, 10, 4, getWidth() - 20, 22,
+                juce::Justification::centred);
+
+            if (partials.empty())
+            {
+                g.drawText("Select a cycle to analyse", getLocalBounds(),
+                    juce::Justification::centred);
+                return;
+            }
+
+            float maximumAmplitude = 0.0f;
+            float maximumRatio = 1.0f;
+            for (const auto& partial : partials)
+            {
+                maximumAmplitude = std::max(
+                    maximumAmplitude, partial.amplitude);
+                maximumRatio = std::max(
+                    maximumRatio, partial.frequencyRatio);
+            }
+            maximumAmplitude = std::max(maximumAmplitude, 0.000001f);
+
+            const float barWidth = juce::jlimit(
+                2.0f, 10.0f,
+                bounds.getWidth() / static_cast<float>(partials.size()) * 0.55f);
+            for (int index = 0;
+                 index < static_cast<int>(partials.size()); ++index)
+            {
+                const auto& partial = partials[static_cast<size_t>(index)];
+                const float x = juce::jmap(partial.frequencyRatio,
+                    0.0f, maximumRatio, bounds.getX(), bounds.getRight());
+                const float height = juce::jmap(partial.amplitude,
+                    0.0f, maximumAmplitude, 0.0f, bounds.getHeight());
+                const bool selected = index == selectedPartial;
+                g.setColour(selected
+                    ? juce::Colour(0xffe19a4f)
+                    : juce::Colour(0xff55d6c2).withAlpha(0.78f));
+                g.fillRect(juce::Rectangle<float>(
+                    x - barWidth * 0.5f, bounds.getBottom() - height,
+                    barWidth, height));
+            }
+
+            if (juce::isPositiveAndBelow(
+                    selectedPartial, static_cast<int>(partials.size())))
+            {
+                const auto& partial =
+                    partials[static_cast<size_t>(selectedPartial)];
+                float phaseDegrees = std::fmod(
+                    juce::radiansToDegrees(partial.phase), 360.0f);
+                if (phaseDegrees < 0.0f)
+                    phaseDegrees += 360.0f;
+                const juce::String details =
+                    "P" + juce::String(selectedPartial + 1)
+                    + "   RATIO " + juce::String(partial.frequencyRatio, 2)
+                    + "x   AMP " + juce::String(partial.amplitude, 4)
+                    + "   PHASE " + juce::String(phaseDegrees, 1)
+                    + " DEG";
+                g.setColour(juce::Colour(0xffe19a4f));
+                g.setFont(12.0f);
+                g.drawFittedText(details, 12, 25, getWidth() - 24, 16,
+                    juce::Justification::centred, 1);
+            }
+
+            g.setColour(juce::Colour(0xff73cdbd).withAlpha(0.75f));
+            g.setFont(11.0f);
+            g.drawText("0x", static_cast<int>(bounds.getX()),
+                static_cast<int>(bounds.getBottom()), 40, 14,
+                juce::Justification::left);
+            g.drawText(juce::String(maximumRatio, 0) + "x",
+                static_cast<int>(bounds.getRight()) - 50,
+                static_cast<int>(bounds.getBottom()), 50, 14,
+                juce::Justification::right);
+            return;
+        }
 
         if (values.size() < 2)
         {
@@ -585,6 +677,38 @@ public:
 
     void mouseDown(const juce::MouseEvent& event) override
     {
+        if (spectrumMode)
+        {
+            if (partials.empty() || !indexClickHandler)
+                return;
+            auto plot = getLocalBounds().toFloat().reduced(10.0f);
+            plot.removeFromTop(40.0f);
+            plot.removeFromBottom(15.0f);
+            float maximumRatio = 1.0f;
+            for (const auto& partial : partials)
+                maximumRatio = std::max(maximumRatio,
+                    partial.frequencyRatio);
+            const float clickedRatio = juce::jmap(juce::jlimit(
+                plot.getX(), plot.getRight(), event.position.x),
+                plot.getX(), plot.getRight(), 0.0f, maximumRatio);
+            int nearest = 0;
+            float nearestDistance = std::numeric_limits<float>::max();
+            for (int index = 0;
+                 index < static_cast<int>(partials.size()); ++index)
+            {
+                const float distance = std::abs(
+                    partials[static_cast<size_t>(index)].frequencyRatio
+                    - clickedRatio);
+                if (distance < nearestDistance)
+                {
+                    nearestDistance = distance;
+                    nearest = index;
+                }
+            }
+            indexClickHandler(nearest);
+            return;
+        }
+
         if (values.size() < 2 || !indexClickHandler)
             return;
 
@@ -603,7 +727,10 @@ public:
 
 private:
     std::vector<double> values;
+    std::vector<DataSonifierAudioProcessor::AdditivePartial> partials;
     juce::String title;
+    bool spectrumMode = false;
+    int selectedPartial = -1;
     int playbackIndex = -1;
     int highlightStart = -1;
     int highlightEnd = -1;
@@ -648,6 +775,7 @@ private:
     bool rebuildCycleAnalysisSeries();
     void selectCycle(int cycleIndex);
     void updateCycleDisplay();
+    void updateAdditivePartialControls();
     void updateEngineVisibility();
     void updateModulationRouteControls();
     void handleManualSelectionPoint(int index);
@@ -723,6 +851,14 @@ private:
     juce::Slider wavetableLoopSmoothingSlider;
     juce::Label wavetablePositionLabel;
     juce::Slider wavetablePositionSlider;
+    juce::Label additivePartialCountLabel;
+    juce::Slider additivePartialCountSlider;
+    juce::Label additivePartialLevelLabel;
+    juce::Slider additivePartialLevelSlider;
+    juce::Label additivePartialRatioLabel;
+    juce::Slider additivePartialRatioSlider;
+    juce::TextButton resetAdditivePartialButton{ "RESET PARTIAL" };
+    juce::TextButton resetAdditiveSpectrumButton{ "RESET SPECTRUM" };
     juce::Label wavetableAttackLabel;
     juce::Label wavetableDecayLabel;
     juce::Label wavetableSustainLabel;
@@ -743,6 +879,28 @@ private:
     juce::Slider outputGainSlider;
     juce::TextButton shapingViewButton{ "SHAPING" };
     juce::TextButton modulationViewButton{ "MODULATION" };
+    juce::TextButton additiveShapingViewButton{ "SPECTRUM" };
+    juce::Label additiveOddEvenLabel;
+    juce::Slider additiveOddEvenSlider;
+    juce::Label additiveTiltLabel;
+    juce::Slider additiveTiltSlider;
+    juce::Label additiveSpreadLabel;
+    juce::Slider additiveSpreadSlider;
+    juce::Label additiveRandomPhaseLabel;
+    juce::Slider additiveRandomPhaseSlider;
+    juce::TextButton resetAdditiveShapingButton{ "RESET SHAPING" };
+    juce::TextButton captureAdditiveMorphAButton{ "SET A" };
+    juce::TextButton captureAdditiveMorphBButton{ "SET B" };
+    juce::Label additiveMorphLabel;
+    juce::Slider additiveMorphSlider;
+    juce::TextButton clearAdditiveMorphButton{ "CLEAR MORPH" };
+    juce::TextButton additiveAutoMorphButton{ "AUTO MORPH" };
+    juce::Label additiveMorphTimingLabel;
+    juce::ComboBox additiveMorphTimingSelector;
+    juce::Label additiveMorphRateLabel;
+    juce::Slider additiveMorphRateSlider;
+    juce::Label additiveMorphDivisionLabel;
+    juce::ComboBox additiveMorphDivisionSelector;
     juce::TextButton modulationRoute1Button{ "ROUTE 1" };
     juce::TextButton modulationRoute2Button{ "ROUTE 2" };
     juce::Label modulationSourceLabel;
@@ -789,13 +947,36 @@ private:
         wavetableLoopSmoothingAttachment;
     std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
         wavetablePositionAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additivePartialCountAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveOddEvenAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveTiltAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveSpreadAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveRandomPhaseAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveMorphAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>
+        additiveAutoMorphAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        additiveMorphTimingAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>
+        additiveMorphRateAttachment;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>
+        additiveMorphDivisionAttachment;
     juce::Label cycleStatusLabel;
     std::vector<std::pair<int, int>> detectedCycles;
     std::vector<double> cycleAnalysisSeries;
     int selectedCycle = -1;
+    int selectedAdditivePartial = 0;
+    bool updatingAdditivePartialControls = false;
     bool usingFullSeries = false;
     bool showingWavetable = false;
     bool showingModulation = false;
+    bool showingAdditiveShaping = false;
     int selectedModulationRoute = 0;
     int manualSelectionStart = -1;
     int lastEngineMode = -1;

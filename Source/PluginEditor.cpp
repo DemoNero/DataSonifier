@@ -519,6 +519,14 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(wavetableLoopSmoothingSlider);
     addAndMakeVisible(wavetablePositionLabel);
     addAndMakeVisible(wavetablePositionSlider);
+    addAndMakeVisible(additivePartialCountLabel);
+    addAndMakeVisible(additivePartialCountSlider);
+    addAndMakeVisible(additivePartialLevelLabel);
+    addAndMakeVisible(additivePartialLevelSlider);
+    addAndMakeVisible(additivePartialRatioLabel);
+    addAndMakeVisible(additivePartialRatioSlider);
+    addAndMakeVisible(resetAdditivePartialButton);
+    addAndMakeVisible(resetAdditiveSpectrumButton);
     addAndMakeVisible(wavetableAttackLabel);
     addAndMakeVisible(wavetableDecayLabel);
     addAndMakeVisible(wavetableSustainLabel);
@@ -539,6 +547,28 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     addAndMakeVisible(outputGainSlider);
     addAndMakeVisible(shapingViewButton);
     addAndMakeVisible(modulationViewButton);
+    addAndMakeVisible(additiveShapingViewButton);
+    addAndMakeVisible(additiveOddEvenLabel);
+    addAndMakeVisible(additiveOddEvenSlider);
+    addAndMakeVisible(additiveTiltLabel);
+    addAndMakeVisible(additiveTiltSlider);
+    addAndMakeVisible(additiveSpreadLabel);
+    addAndMakeVisible(additiveSpreadSlider);
+    addAndMakeVisible(additiveRandomPhaseLabel);
+    addAndMakeVisible(additiveRandomPhaseSlider);
+    addAndMakeVisible(resetAdditiveShapingButton);
+    addAndMakeVisible(captureAdditiveMorphAButton);
+    addAndMakeVisible(captureAdditiveMorphBButton);
+    addAndMakeVisible(additiveMorphLabel);
+    addAndMakeVisible(additiveMorphSlider);
+    addAndMakeVisible(clearAdditiveMorphButton);
+    addAndMakeVisible(additiveAutoMorphButton);
+    addAndMakeVisible(additiveMorphTimingLabel);
+    addAndMakeVisible(additiveMorphTimingSelector);
+    addAndMakeVisible(additiveMorphRateLabel);
+    addAndMakeVisible(additiveMorphRateSlider);
+    addAndMakeVisible(additiveMorphDivisionLabel);
+    addAndMakeVisible(additiveMorphDivisionSelector);
     addAndMakeVisible(modulationRoute1Button);
     addAndMakeVisible(modulationRoute2Button);
     addAndMakeVisible(modulationSourceLabel);
@@ -615,7 +645,7 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     openCsvButton.setColour(juce::TextButton::textColourOffId, mint);
     openCsvButton.getProperties().set("lcdButton", true);
 
-    engineModeSelector.addItemList({ "MIDI", "WAVETABLE" }, 1);
+    engineModeSelector.addItemList({ "MIDI", "WAVETABLE", "ADDITIVE" }, 1);
     engineModeAttachment = std::make_unique<
         juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
             audioProcessor.getParameterState(),
@@ -624,17 +654,27 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
 
     for (auto* button : { &seriesViewButton, &wavetableViewButton,
                           &shapingViewButton, &modulationViewButton,
+                          &additiveShapingViewButton,
                           &modulationRoute1Button, &modulationRoute2Button })
         button->getProperties().set("hardwareSwitch", true);
     shapingViewButton.onClick = [this]()
     {
         showingModulation = false;
+        showingAdditiveShaping = false;
         updateEngineVisibility();
         repaint();
     };
     modulationViewButton.onClick = [this]()
     {
         showingModulation = true;
+        showingAdditiveShaping = false;
+        updateEngineVisibility();
+        repaint();
+    };
+    additiveShapingViewButton.onClick = [this]()
+    {
+        showingModulation = false;
+        showingAdditiveShaping = true;
         updateEngineVisibility();
         repaint();
     };
@@ -732,6 +772,123 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         wavetableHighPassResonanceLabel, wavetableHighPassResonanceSlider,
         "HP RESO");
     configureEnvelopeControl(outputGainLabel, outputGainSlider, "GAIN");
+    configureEnvelopeControl(
+        additiveOddEvenLabel, additiveOddEvenSlider, "ODD / EVEN");
+    configureEnvelopeControl(
+        additiveTiltLabel, additiveTiltSlider, "SPECTRAL TILT");
+    configureEnvelopeControl(
+        additiveSpreadLabel, additiveSpreadSlider, "FREQ SPREAD");
+    configureEnvelopeControl(
+        additiveRandomPhaseLabel, additiveRandomPhaseSlider, "PHASE SPREAD");
+    configureEnvelopeControl(
+        additiveMorphLabel, additiveMorphSlider, "SPECTRUM MORPH");
+    additiveOddEvenAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveOddEven",
+            additiveOddEvenSlider);
+    additiveTiltAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveTilt",
+            additiveTiltSlider);
+    additiveSpreadAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveSpread",
+            additiveSpreadSlider);
+    additiveRandomPhaseAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveRandomPhase",
+            additiveRandomPhaseSlider);
+    additiveMorphAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveMorph",
+            additiveMorphSlider);
+    additiveAutoMorphButton.setClickingTogglesState(true);
+    additiveAutoMorphButton.getProperties().set("lcdButton", true);
+    additiveAutoMorphAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ButtonAttachment>(
+            audioProcessor.getParameterState(), "additiveMorphAuto",
+            additiveAutoMorphButton);
+    additiveMorphTimingLabel.setText("TIMING", juce::dontSendNotification);
+    additiveMorphTimingSelector.addItemList({ "FREE", "SYNC" }, 1);
+    additiveMorphTimingAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(), "additiveMorphTiming",
+            additiveMorphTimingSelector);
+    additiveMorphRateLabel.setText("RATE", juce::dontSendNotification);
+    additiveMorphRateSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    additiveMorphRateSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight, false, 76, 25);
+    additiveMorphRateSlider.setTextValueSuffix(" Hz");
+    additiveMorphRateAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additiveMorphRate",
+            additiveMorphRateSlider);
+    additiveMorphDivisionLabel.setText(
+        "DIVISION", juce::dontSendNotification);
+    additiveMorphDivisionSelector.addItemList(
+        { "1/1", "1/2", "1/4", "1/8", "1/16",
+          "1/4T", "1/8T", "1/16T" }, 1);
+    additiveMorphDivisionAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::ComboBoxAttachment>(
+            audioProcessor.getParameterState(), "additiveMorphDivision",
+            additiveMorphDivisionSelector);
+    additiveMorphTimingSelector.onChange = [this]()
+    {
+        updateEngineVisibility();
+    };
+    const auto refreshAdditiveSpectrum = [this]()
+    {
+        const juce::Component::SafePointer<
+            DataSonifierAudioProcessorEditor> safeEditor(this);
+        juce::Timer::callAfterDelay(25, [safeEditor]()
+        {
+            if (safeEditor != nullptr && safeEditor->showingWavetable)
+                safeEditor->updateCycleDisplay();
+        });
+    };
+    additiveOddEvenSlider.onValueChange = refreshAdditiveSpectrum;
+    additiveTiltSlider.onValueChange = refreshAdditiveSpectrum;
+    additiveSpreadSlider.onValueChange = refreshAdditiveSpectrum;
+    additiveRandomPhaseSlider.onValueChange = refreshAdditiveSpectrum;
+    additiveMorphSlider.onValueChange = refreshAdditiveSpectrum;
+    for (auto* button : { &captureAdditiveMorphAButton,
+                          &captureAdditiveMorphBButton,
+                          &clearAdditiveMorphButton })
+        button->getProperties().set("lcdButton", true);
+    captureAdditiveMorphAButton.onClick = [this]()
+    {
+        audioProcessor.captureAdditiveMorphSource(0, selectedCycle);
+        updateEngineVisibility();
+        updateCycleDisplay();
+    };
+    captureAdditiveMorphBButton.onClick = [this]()
+    {
+        audioProcessor.captureAdditiveMorphSource(1, selectedCycle);
+        updateEngineVisibility();
+        updateCycleDisplay();
+    };
+    clearAdditiveMorphButton.onClick = [this]()
+    {
+        audioProcessor.clearAdditiveMorphSources();
+        updateEngineVisibility();
+        updateCycleDisplay();
+    };
+    resetAdditiveShapingButton.getProperties().set("lcdButton", true);
+    resetAdditiveShapingButton.onClick = [this]()
+    {
+        for (const auto* id : { "additiveOddEven", "additiveTilt",
+                                "additiveSpread", "additiveRandomPhase" })
+        {
+            if (auto* parameter = audioProcessor.getParameterState()
+                    .getParameter(id))
+            {
+                parameter->beginChangeGesture();
+                parameter->setValueNotifyingHost(parameter->getDefaultValue());
+                parameter->endChangeGesture();
+            }
+        }
+        updateCycleDisplay();
+    };
     wavetableNormaliseButton.getProperties().set("hardwareSwitch", true);
     wavetableNormaliseOffButton.getProperties().set("hardwareSwitch", true);
     wavetableLoopSmoothingLabel.setText(
@@ -789,6 +946,79 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
         juce::AudioProcessorValueTreeState::SliderAttachment>(
             audioProcessor.getParameterState(), "wavetablePosition",
             wavetablePositionSlider);
+    additivePartialCountLabel.setText(
+        "PARTIAL COUNT", juce::dontSendNotification);
+    additivePartialCountSlider.setSliderStyle(
+        juce::Slider::LinearHorizontal);
+    additivePartialCountSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight, false, 62, 25);
+    additivePartialCountAttachment = std::make_unique<
+        juce::AudioProcessorValueTreeState::SliderAttachment>(
+            audioProcessor.getParameterState(), "additivePartialCount",
+            additivePartialCountSlider);
+    additivePartialCountSlider.onValueChange = [this]()
+    {
+        const juce::Component::SafePointer<
+            DataSonifierAudioProcessorEditor> safeEditor(this);
+        juce::Timer::callAfterDelay(80, [safeEditor]()
+        {
+            if (safeEditor != nullptr)
+            {
+                const int lastPartial = juce::jmax(0,
+                    static_cast<int>(safeEditor->audioProcessor
+                        .getAdditivePartialsSnapshot().size()) - 1);
+                safeEditor->selectedAdditivePartial = juce::jlimit(
+                    0, lastPartial, safeEditor->selectedAdditivePartial);
+                safeEditor->updateCycleDisplay();
+            }
+        });
+    };
+    additivePartialLevelLabel.setText(
+        "PARTIAL LEVEL", juce::dontSendNotification);
+    additivePartialLevelSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    additivePartialLevelSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight, false, 62, 25);
+    additivePartialLevelSlider.setRange(0.0, 200.0, 1.0);
+    additivePartialLevelSlider.setTextValueSuffix(" %");
+    additivePartialLevelSlider.onValueChange = [this]()
+    {
+        if (updatingAdditivePartialControls)
+            return;
+        audioProcessor.setAdditivePartialLevel(selectedAdditivePartial,
+            static_cast<float>(additivePartialLevelSlider.getValue() / 100.0));
+        updateCycleDisplay();
+    };
+    additivePartialRatioLabel.setText(
+        "PARTIAL RATIO", juce::dontSendNotification);
+    additivePartialRatioSlider.setSliderStyle(juce::Slider::LinearHorizontal);
+    additivePartialRatioSlider.setTextBoxStyle(
+        juce::Slider::TextBoxRight, false, 62, 25);
+    additivePartialRatioSlider.setRange(0.25, 1024.0, 0.01);
+    additivePartialRatioSlider.setSkewFactorFromMidPoint(4.0);
+    additivePartialRatioSlider.setTextValueSuffix(" x");
+    additivePartialRatioSlider.onValueChange = [this]()
+    {
+        if (updatingAdditivePartialControls)
+            return;
+        audioProcessor.setAdditivePartialRatio(selectedAdditivePartial,
+            static_cast<float>(additivePartialRatioSlider.getValue()));
+        updateCycleDisplay();
+    };
+    for (auto* button : {
+             &resetAdditivePartialButton, &resetAdditiveSpectrumButton })
+        button->getProperties().set("lcdButton", true);
+    resetAdditivePartialButton.onClick = [this]()
+    {
+        audioProcessor.resetAdditivePartial(selectedAdditivePartial);
+        updateAdditivePartialControls();
+        updateCycleDisplay();
+    };
+    resetAdditiveSpectrumButton.onClick = [this]()
+    {
+        audioProcessor.resetAllAdditivePartials();
+        updateAdditivePartialControls();
+        updateCycleDisplay();
+    };
 
     auto* editor = this;
     const auto refreshWavetableDisplay = [editor]()
@@ -916,7 +1146,17 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     cycleDetectionMethodSelector.onChange = [this]() { detectCycles(); };
     seriesGraph.setIndexClickHandler([this](int index)
     {
-        handleManualSelectionPoint(index);
+        const int engineMode = static_cast<int>(std::round(
+            audioProcessor.getParameterState()
+                .getRawParameterValue("engineMode")->load()));
+        if (engineMode == 2 && showingWavetable)
+        {
+            selectedAdditivePartial = index;
+            updateAdditivePartialControls();
+            updateCycleDisplay();
+        }
+        else
+            handleManualSelectionPoint(index);
     });
 
     cycleMinimumLengthAttachment = std::make_unique<
@@ -1337,6 +1577,13 @@ DataSonifierAudioProcessorEditor::DataSonifierAudioProcessorEditor (DataSonifier
     for (auto* label : {
              &wavetableLoopSmoothingLabel,
              &wavetablePositionLabel,
+             &additivePartialCountLabel,
+             &additivePartialLevelLabel, &additivePartialRatioLabel,
+             &additiveOddEvenLabel, &additiveTiltLabel,
+             &additiveSpreadLabel, &additiveRandomPhaseLabel,
+             &additiveMorphLabel,
+             &additiveMorphTimingLabel, &additiveMorphRateLabel,
+             &additiveMorphDivisionLabel,
              &wavetableAttackLabel, &wavetableDecayLabel,
              &wavetableSustainLabel, &wavetableReleaseLabel,
              &wavetableFilterCutoffLabel,
@@ -1395,7 +1642,7 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         juce::Justification::centredLeft);
     g.drawText("ENGINE", 476, 3, 70, 18,
         juce::Justification::centredRight);
-    g.drawText("VERSION 5.2", getWidth() - 204, 3, 180, 18,
+    g.drawText("VERSION 6.7", getWidth() - 204, 3, 180, 18,
         juce::Justification::centredRight);
 
     const auto drawPanel = [&](juce::Rectangle<int> area,
@@ -1416,9 +1663,10 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
     const int engineMode = static_cast<int>(std::round(
         audioProcessor.getParameterState()
             .getRawParameterValue("engineMode")->load()));
-    const bool wavetableEngine = engineMode == 1;
+    const bool wavetableEngine = engineMode != 0;
     drawPanel({ 682, 34, 330, 562 },
-        wavetableEngine ? "WAVETABLE" : "MIDI", false);
+        engineMode == 2 ? "ADDITIVE" : wavetableEngine ? "WAVETABLE" : "MIDI",
+        false);
     drawPanel({ 1028, 34, 228, 562 },
         wavetableEngine ? "SOUND SHAPING" : "MIDI CC TARGET", false);
 
@@ -1444,20 +1692,38 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         g.setFont(juce::FontOptions(10.0f, juce::Font::bold));
         g.drawText("SERIES", 698, 62, 144, 12,
             juce::Justification::centred);
-        g.drawText("WAVETABLE", 852, 62, 144, 12,
+        g.drawText(engineMode == 2 ? "SPECTRUM" : "WAVETABLE",
+            852, 62, 144, 12,
             juce::Justification::centred);
-        g.drawText("SHAPING", 1044, 62, 94, 12,
-            juce::Justification::centred);
-        g.drawText("MODULATION", 1146, 62, 94, 12,
-            juce::Justification::centred);
+        if (engineMode == 2)
+        {
+            g.drawText("SHAPING", 1038, 62, 66, 12,
+                juce::Justification::centred);
+            g.drawText("MODULATION", 1109, 62, 76, 12,
+                juce::Justification::centred);
+            g.drawText("SPECTRUM", 1190, 62, 60, 12,
+                juce::Justification::centred);
+        }
+        else
+        {
+            g.drawText("SHAPING", 1044, 62, 94, 12,
+                juce::Justification::centred);
+            g.drawText("MODULATION", 1146, 62, 94, 12,
+                juce::Justification::centred);
+        }
 
         g.setColour(juce::Colour(0xff315c52));
         g.setFont(juce::FontOptions(11.5f, juce::Font::bold));
-        g.drawText("NORMALIZE", 698, 116, 144, 14,
-            juce::Justification::left);
+        g.drawText(engineMode == 2 ? "SPECTRAL ANALYSIS" : "NORMALIZE",
+            698, 116, 144, 14, juce::Justification::left);
         g.drawText("CYCLE DETECTION", 698, 326, 298, 14,
             juce::Justification::left);
-        if (!showingModulation)
+        if (engineMode == 2 && showingAdditiveShaping)
+        {
+            g.drawText("SPECTRUM SHAPING", 1044, 112, 196, 14,
+                juce::Justification::left);
+        }
+        else if (!showingModulation)
         {
             g.drawText("ENVELOPE", 1044, 102, 196, 14,
                 juce::Justification::left);
@@ -1483,17 +1749,17 @@ void DataSonifierAudioProcessorEditor::paint (juce::Graphics& g)
         g.drawText("FREE", 720, 148, 78, 14, juce::Justification::centred);
         g.drawText("SYNC", 873, 148, 78, 14, juce::Justification::centred);
     }
-    else
+    else if (engineMode == 1)
     {
         g.drawText("ON", 698, 132, 144, 12, juce::Justification::centred);
         g.drawText("OFF", 852, 132, 144, 12, juce::Justification::centred);
-        if (showingModulation)
-        {
-            g.drawText("ROUTE 1", 1044, 108, 94, 12,
-                juce::Justification::centred);
-            g.drawText("ROUTE 2", 1146, 108, 94, 12,
-                juce::Justification::centred);
-        }
+    }
+    if (wavetableEngine && showingModulation)
+    {
+        g.drawText("ROUTE 1", 1044, 108, 94, 12,
+            juce::Justification::centred);
+        g.drawText("ROUTE 2", 1146, 108, 94, 12,
+            juce::Justification::centred);
     }
     const int outputMode = static_cast<int>(std::round(
         audioProcessor.getParameterState()
@@ -1535,12 +1801,27 @@ void DataSonifierAudioProcessorEditor::resized()
         wavetableSliderLabelX, 210, wavetableSliderLabelWidth, 18);
     wavetablePositionSlider.setBounds(
         wavetableSliderX, 204, wavetableSliderWidth, wavetableSliderHeight);
+    additivePartialCountLabel.setBounds(
+        wavetableSliderLabelX, 174, wavetableSliderLabelWidth, 18);
+    additivePartialCountSlider.setBounds(
+        wavetableSliderX, 168, wavetableSliderWidth, wavetableSliderHeight);
+    additivePartialLevelLabel.setBounds(
+        wavetableSliderLabelX, 204, wavetableSliderLabelWidth, 18);
+    additivePartialLevelSlider.setBounds(
+        wavetableSliderX, 198, wavetableSliderWidth, wavetableSliderHeight);
+    additivePartialRatioLabel.setBounds(
+        wavetableSliderLabelX, 234, wavetableSliderLabelWidth, 18);
+    additivePartialRatioSlider.setBounds(
+        wavetableSliderX, 228, wavetableSliderWidth, wavetableSliderHeight);
+    resetAdditivePartialButton.setBounds(698, 262, 144, 26);
+    resetAdditiveSpectrumButton.setBounds(852, 262, 144, 26);
     previousCycleButton.setBounds(698, 242, 42, 32);
     cycleStatusLabel.setBounds(746, 242, 202, 32);
     nextCycleButton.setBounds(954, 242, 42, 32);
     auditionCycleButton.setBounds(698, 280, 298, 34);
     shapingViewButton.setBounds(1078, 78, 26, 18);
     modulationViewButton.setBounds(1180, 78, 26, 18);
+    additiveShapingViewButton.setBounds(1210, 78, 26, 18);
     modulationRoute1Button.setBounds(1078, 124, 26, 18);
     modulationRoute2Button.setBounds(1180, 124, 26, 18);
     wavetableAttackLabel.setBounds(1044, 116, 196, 18);
@@ -1561,6 +1842,27 @@ void DataSonifierAudioProcessorEditor::resized()
     wavetableHighPassResonanceSlider.setBounds(1044, 498, 196, 28);
     outputGainLabel.setBounds(1044, 530, 196, 18);
     outputGainSlider.setBounds(1044, 546, 196, 28);
+    captureAdditiveMorphAButton.setBounds(1044, 136, 94, 26);
+    captureAdditiveMorphBButton.setBounds(1146, 136, 94, 26);
+    additiveMorphLabel.setBounds(1044, 174, 196, 18);
+    additiveMorphSlider.setBounds(1044, 190, 196, 28);
+    additiveOddEvenLabel.setBounds(1044, 226, 196, 18);
+    additiveOddEvenSlider.setBounds(1044, 242, 196, 28);
+    additiveTiltLabel.setBounds(1044, 278, 196, 18);
+    additiveTiltSlider.setBounds(1044, 294, 196, 28);
+    additiveSpreadLabel.setBounds(1044, 330, 196, 18);
+    additiveSpreadSlider.setBounds(1044, 346, 196, 28);
+    additiveRandomPhaseLabel.setBounds(1044, 382, 196, 18);
+    additiveRandomPhaseSlider.setBounds(1044, 398, 196, 28);
+    resetAdditiveShapingButton.setBounds(1044, 448, 94, 30);
+    clearAdditiveMorphButton.setBounds(1146, 448, 94, 30);
+    additiveAutoMorphButton.setBounds(1044, 486, 196, 28);
+    additiveMorphTimingLabel.setBounds(1044, 520, 58, 28);
+    additiveMorphTimingSelector.setBounds(1104, 520, 136, 28);
+    additiveMorphRateLabel.setBounds(1044, 554, 58, 28);
+    additiveMorphRateSlider.setBounds(1104, 554, 136, 28);
+    additiveMorphDivisionLabel.setBounds(1044, 554, 58, 28);
+    additiveMorphDivisionSelector.setBounds(1104, 554, 136, 28);
     modulationSourceLabel.setBounds(1044, 170, 196, 18);
     modulationSourceSelector.setBounds(1044, 190, 196, 30);
     modulationTargetLabel.setBounds(1044, 234, 196, 18);
@@ -1757,7 +2059,7 @@ void DataSonifierAudioProcessorEditor::cellClicked(
         audioProcessor.getParameterState().getRawParameterValue("engineMode");
 
     const bool wavetableEngine = engineModeParameter != nullptr
-        && static_cast<int>(std::round(engineModeParameter->load())) == 1;
+        && static_cast<int>(std::round(engineModeParameter->load())) != 0;
 
     // In Wavetable mode, clicking a row inside a detected cycle makes that
     // cycle current everywhere. Rows outside all cycles leave the current
@@ -2005,7 +2307,7 @@ void DataSonifierAudioProcessorEditor::handleManualSelectionPoint(int index)
     const int method = static_cast<int>(std::round(
         audioProcessor.getParameterState()
             .getRawParameterValue("cycleMethod")->load()));
-    if (engineMode != 1 || method != 5 || showingWavetable
+    if (engineMode == 0 || method != 5 || showingWavetable
         || !juce::isPositiveAndBelow(
             index, static_cast<int>(cycleAnalysisSeries.size())))
         return;
@@ -2102,6 +2404,7 @@ void DataSonifierAudioProcessorEditor::selectCycle(int cycleIndex)
         return;
 
     selectedCycle = cycleIndex;
+    selectedAdditivePartial = 0;
     std::vector<std::vector<double>> frames;
     frames.reserve(detectedCycles.size());
     for (const auto [start, end] : detectedCycles)
@@ -2126,14 +2429,22 @@ void DataSonifierAudioProcessorEditor::selectCycle(int cycleIndex)
         parameter->endChangeGesture();
     }
     updateCycleDisplay();
+    const juce::Component::SafePointer<
+        DataSonifierAudioProcessorEditor> safeEditor(this);
+    juce::Timer::callAfterDelay(80, [safeEditor]()
+    {
+        if (safeEditor != nullptr)
+            safeEditor->updateCycleDisplay();
+    });
     csvTable.repaint();
 }
 
 void DataSonifierAudioProcessorEditor::updateCycleDisplay()
 {
-    const bool wavetableEngine = static_cast<int>(std::round(
+    const int engineMode = static_cast<int>(std::round(
         audioProcessor.getParameterState()
-            .getRawParameterValue("engineMode")->load())) == 1;
+            .getRawParameterValue("engineMode")->load()));
+    const bool wavetableEngine = engineMode != 0;
     const bool hasCycle = juce::isPositiveAndBelow(
         selectedCycle, static_cast<int>(detectedCycles.size()));
 
@@ -2193,12 +2504,28 @@ void DataSonifierAudioProcessorEditor::updateCycleDisplay()
     const auto [start, end] = detectedCycles[selectedCycle];
     if (showingWavetable)
     {
-        const auto interpolatedWavetable =
-            audioProcessor.getWavetableSnapshot();
-        seriesGraph.setValues(interpolatedWavetable);
-        seriesGraph.setTitle("INTERPOLATED WAVETABLE - "
-            + juce::String(interpolatedWavetable.size())
-            + " SAMPLES");
+        if (engineMode == 2)
+        {
+            const auto partials =
+                audioProcessor.getAdditivePartialsSnapshot();
+            selectedAdditivePartial = partials.empty()
+                ? 0
+                : juce::jlimit(0, static_cast<int>(partials.size()) - 1,
+                    selectedAdditivePartial);
+            updateAdditivePartialControls();
+            seriesGraph.setSpectrum(partials, selectedAdditivePartial);
+            seriesGraph.setTitle("ADDITIVE SPECTRUM - "
+                + juce::String(partials.size()) + " PARTIALS");
+        }
+        else
+        {
+            const auto interpolatedWavetable =
+                audioProcessor.getWavetableSnapshot();
+            seriesGraph.setValues(interpolatedWavetable);
+            seriesGraph.setTitle("INTERPOLATED WAVETABLE - "
+                + juce::String(interpolatedWavetable.size())
+                + " SAMPLES");
+        }
         seriesGraph.setCycleRanges({});
         seriesGraph.setHighlightRange(-1, -1);
     }
@@ -2248,12 +2575,36 @@ void DataSonifierAudioProcessorEditor::updateModulationRouteControls()
     repaint();
 }
 
+void DataSonifierAudioProcessorEditor::updateAdditivePartialControls()
+{
+    const auto partials = audioProcessor.getAdditivePartialsSnapshot();
+    const bool hasPartial = juce::isPositiveAndBelow(
+        selectedAdditivePartial, static_cast<int>(partials.size()));
+    const bool morphActive = audioProcessor.getAdditiveMorphCycle(0) >= 0
+        && audioProcessor.getAdditiveMorphCycle(1) >= 0;
+    additivePartialLevelSlider.setEnabled(hasPartial && !morphActive);
+    additivePartialRatioSlider.setEnabled(hasPartial && !morphActive);
+    resetAdditivePartialButton.setEnabled(hasPartial && !morphActive);
+    if (!hasPartial)
+        return;
+
+    const juce::ScopedValueSetter<bool> guard(
+        updatingAdditivePartialControls, true);
+    additivePartialLevelSlider.setValue(
+        audioProcessor.getAdditivePartialLevel(selectedAdditivePartial)
+            * 100.0f,
+        juce::dontSendNotification);
+    additivePartialRatioSlider.setValue(
+        audioProcessor.getAdditivePartialRatio(selectedAdditivePartial),
+        juce::dontSendNotification);
+}
+
 void DataSonifierAudioProcessorEditor::updateEngineVisibility()
 {
     const int engineMode = static_cast<int>(std::round(
         audioProcessor.getParameterState()
             .getRawParameterValue("engineMode")->load()));
-    const bool wavetableEngine = engineMode == 1;
+    const bool wavetableEngine = engineMode != 0;
 
     const std::initializer_list<juce::Component*> midiComponents {
           &outputNoteButton,
@@ -2277,7 +2628,11 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
           &wavetableNormaliseButton, &wavetableNormaliseOffButton,
           &wavetableLoopSmoothingLabel,
           &wavetableLoopSmoothingSlider, &wavetablePositionLabel,
-          &wavetablePositionSlider, &cycleMinimumLengthLabel,
+          &wavetablePositionSlider, &additivePartialCountLabel,
+          &additivePartialCountSlider, &additivePartialLevelLabel,
+          &additivePartialLevelSlider, &additivePartialRatioLabel,
+          &additivePartialRatioSlider, &resetAdditivePartialButton,
+          &resetAdditiveSpectrumButton, &cycleMinimumLengthLabel,
           &wavetableAttackLabel, &wavetableAttackSlider,
           &wavetableDecayLabel, &wavetableDecaySlider,
           &wavetableSustainLabel, &wavetableSustainSlider,
@@ -2289,6 +2644,17 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
           &wavetableHighPassResonanceSlider, &outputGainLabel,
           &outputGainSlider,
           &shapingViewButton, &modulationViewButton,
+          &additiveShapingViewButton, &additiveOddEvenLabel,
+          &additiveOddEvenSlider, &additiveTiltLabel, &additiveTiltSlider,
+          &additiveSpreadLabel, &additiveSpreadSlider,
+          &additiveRandomPhaseLabel, &additiveRandomPhaseSlider,
+          &resetAdditiveShapingButton, &captureAdditiveMorphAButton,
+          &captureAdditiveMorphBButton, &additiveMorphLabel,
+          &additiveMorphSlider, &clearAdditiveMorphButton,
+          &additiveAutoMorphButton, &additiveMorphTimingLabel,
+          &additiveMorphTimingSelector, &additiveMorphRateLabel,
+          &additiveMorphRateSlider, &additiveMorphDivisionLabel,
+          &additiveMorphDivisionSelector,
           &modulationRoute1Button, &modulationRoute2Button,
           &modulationSourceLabel, &modulationSourceSelector,
           &modulationTargetLabel, &modulationTargetSelector,
@@ -2304,11 +2670,111 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
     for (auto* component : wavetableComponents)
         component->setVisible(wavetableEngine);
 
+    const bool additiveEngine = engineMode == 2;
+    if (!additiveEngine)
+        showingAdditiveShaping = false;
+    for (auto* component : {
+             static_cast<juce::Component*>(&wavetableNormaliseButton),
+             static_cast<juce::Component*>(&wavetableNormaliseOffButton),
+             static_cast<juce::Component*>(&wavetableLoopSmoothingLabel),
+             static_cast<juce::Component*>(&wavetableLoopSmoothingSlider),
+             static_cast<juce::Component*>(&wavetablePositionLabel),
+             static_cast<juce::Component*>(&wavetablePositionSlider) })
+        component->setVisible(wavetableEngine && !additiveEngine);
+    additivePartialCountLabel.setVisible(additiveEngine);
+    additivePartialCountSlider.setVisible(additiveEngine);
+    additivePartialLevelLabel.setVisible(additiveEngine);
+    additivePartialLevelSlider.setVisible(additiveEngine);
+    additivePartialRatioLabel.setVisible(additiveEngine);
+    additivePartialRatioSlider.setVisible(additiveEngine);
+    resetAdditivePartialButton.setVisible(additiveEngine);
+    resetAdditiveSpectrumButton.setVisible(additiveEngine);
+    additiveShapingViewButton.setVisible(additiveEngine);
+    additiveOddEvenLabel.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    additiveOddEvenSlider.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    additiveTiltLabel.setVisible(additiveEngine && showingAdditiveShaping);
+    additiveTiltSlider.setVisible(additiveEngine && showingAdditiveShaping);
+    additiveSpreadLabel.setVisible(additiveEngine && showingAdditiveShaping);
+    additiveSpreadSlider.setVisible(additiveEngine && showingAdditiveShaping);
+    additiveRandomPhaseLabel.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    additiveRandomPhaseSlider.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    resetAdditiveShapingButton.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    captureAdditiveMorphAButton.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    captureAdditiveMorphBButton.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    additiveMorphLabel.setVisible(additiveEngine && showingAdditiveShaping);
+    additiveMorphSlider.setVisible(additiveEngine && showingAdditiveShaping);
+    clearAdditiveMorphButton.setVisible(
+        additiveEngine && showingAdditiveShaping);
+    const int morphCycleA = audioProcessor.getAdditiveMorphCycle(0);
+    const int morphCycleB = audioProcessor.getAdditiveMorphCycle(1);
+    captureAdditiveMorphAButton.setButtonText(morphCycleA >= 0
+        ? "A: C" + juce::String(morphCycleA + 1) : "SET A");
+    captureAdditiveMorphBButton.setButtonText(morphCycleB >= 0
+        ? "B: C" + juce::String(morphCycleB + 1) : "SET B");
+    additiveMorphSlider.setEnabled(morphCycleA >= 0 && morphCycleB >= 0);
+    clearAdditiveMorphButton.setEnabled(morphCycleA >= 0 || morphCycleB >= 0);
+    const bool morphReady = morphCycleA >= 0 && morphCycleB >= 0;
+    const bool showMorphAutomation = additiveEngine && showingAdditiveShaping;
+    const bool syncMorph = static_cast<int>(std::round(audioProcessor
+        .getParameterState().getRawParameterValue("additiveMorphTiming")
+        ->load())) == 1;
+    additiveAutoMorphButton.setVisible(showMorphAutomation);
+    additiveAutoMorphButton.setEnabled(morphReady);
+    additiveMorphTimingLabel.setVisible(showMorphAutomation);
+    additiveMorphTimingSelector.setVisible(showMorphAutomation);
+    additiveMorphTimingSelector.setEnabled(morphReady);
+    additiveMorphRateLabel.setVisible(showMorphAutomation && !syncMorph);
+    additiveMorphRateSlider.setVisible(showMorphAutomation && !syncMorph);
+    additiveMorphRateSlider.setEnabled(morphReady);
+    additiveMorphDivisionLabel.setVisible(showMorphAutomation && syncMorph);
+    additiveMorphDivisionSelector.setVisible(showMorphAutomation && syncMorph);
+    additiveMorphDivisionSelector.setEnabled(morphReady);
+    additiveMorphSlider.setEnabled(morphReady
+        && audioProcessor.getParameterState()
+            .getRawParameterValue("additiveMorphAuto")->load() < 0.5f);
+    if (additiveEngine)
+    {
+        shapingViewButton.setBounds(1058, 78, 26, 18);
+        modulationViewButton.setBounds(1134, 78, 26, 18);
+        additiveShapingViewButton.setBounds(1207, 78, 26, 18);
+        additivePartialCountLabel.setBounds(698, 134, 110, 18);
+        additivePartialCountSlider.setBounds(810, 128, 186, 30);
+        additivePartialLevelLabel.setBounds(698, 164, 110, 18);
+        additivePartialLevelSlider.setBounds(810, 158, 186, 30);
+        additivePartialRatioLabel.setBounds(698, 194, 110, 18);
+        additivePartialRatioSlider.setBounds(810, 188, 186, 30);
+        resetAdditivePartialButton.setBounds(698, 220, 144, 24);
+        resetAdditiveSpectrumButton.setBounds(852, 220, 144, 24);
+        previousCycleButton.setBounds(698, 250, 42, 26);
+        cycleStatusLabel.setBounds(746, 250, 202, 26);
+        nextCycleButton.setBounds(954, 250, 42, 26);
+        auditionCycleButton.setBounds(698, 282, 298, 30);
+    }
+    else
+    {
+        shapingViewButton.setBounds(1078, 78, 26, 18);
+        modulationViewButton.setBounds(1180, 78, 26, 18);
+        previousCycleButton.setBounds(698, 242, 42, 32);
+        cycleStatusLabel.setBounds(746, 242, 202, 32);
+        nextCycleButton.setBounds(954, 242, 42, 32);
+        auditionCycleButton.setBounds(698, 280, 298, 34);
+    }
+
     shapingViewButton.setToggleState(
-        wavetableEngine && !showingModulation,
+        wavetableEngine && !showingModulation && !showingAdditiveShaping,
         juce::dontSendNotification);
     modulationViewButton.setToggleState(
         wavetableEngine && showingModulation,
+        juce::dontSendNotification);
+    additiveShapingViewButton.setToggleState(
+        additiveEngine && showingAdditiveShaping,
         juce::dontSendNotification);
     modulationRoute1Button.setToggleState(
         wavetableEngine && showingModulation
@@ -2338,7 +2804,8 @@ void DataSonifierAudioProcessorEditor::updateEngineVisibility()
              static_cast<juce::Component*>(&wavetableHighPassResonanceSlider),
              static_cast<juce::Component*>(&outputGainLabel),
              static_cast<juce::Component*>(&outputGainSlider) })
-        component->setVisible(wavetableEngine && !showingModulation);
+        component->setVisible(wavetableEngine && !showingModulation
+            && !showingAdditiveShaping);
 
     for (auto* component : {
              static_cast<juce::Component*>(&modulationSourceLabel),
@@ -2509,6 +2976,13 @@ void DataSonifierAudioProcessorEditor::rebuildDateRangeSelectors(
 void DataSonifierAudioProcessorEditor::timerCallback()
 {
     updateEngineVisibility();
+    const int currentEngine = static_cast<int>(std::round(
+        audioProcessor.getParameterState()
+            .getRawParameterValue("engineMode")->load()));
+    if (currentEngine == 2 && showingWavetable
+        && audioProcessor.getParameterState()
+            .getRawParameterValue("additiveMorphAuto")->load() >= 0.5f)
+        updateCycleDisplay();
     seriesGraph.setPlaybackIndex(
         audioProcessor.getCurrentPlaybackIndex());
 

@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <map>
 
 //==============================================================================
 /**
@@ -18,6 +19,14 @@ class DataSonifierAudioProcessor  : public juce::AudioProcessor,
                                     private juce::AsyncUpdater
 {
 public:
+    struct AdditivePartial
+    {
+        int sourceBin = 1;
+        float frequencyRatio = 1.0f;
+        float amplitude = 0.0f;
+        float phase = 0.0f;
+    };
+
     struct DataStateSnapshot
     {
         std::vector<juce::StringArray> displayData;
@@ -85,6 +94,17 @@ public:
     void auditionWavetable();
     DataStateSnapshot getDataStateSnapshot() const;
     std::vector<double> getWavetableSnapshot() const;
+    std::vector<AdditivePartial> getAdditivePartialsSnapshot() const;
+    float getAdditivePartialLevel(int index) const;
+    float getAdditivePartialBaseRatio(int index) const;
+    float getAdditivePartialRatio(int index) const;
+    void setAdditivePartialLevel(int index, float level);
+    void setAdditivePartialRatio(int index, float ratio);
+    void resetAdditivePartial(int index);
+    void resetAllAdditivePartials();
+    void captureAdditiveMorphSource(int slot, int cycleIndex);
+    void clearAdditiveMorphSources();
+    int getAdditiveMorphCycle(int slot) const;
 
     juce::AudioProcessorValueTreeState& getParameterState() noexcept;
     int getCurrentPlaybackIndex() const noexcept;
@@ -99,6 +119,19 @@ private:
     void processWavetableSynth(
         juce::AudioBuffer<float>& buffer,
         juce::MidiBuffer& midiMessages);
+    void processAdditiveSynth(
+        juce::AudioBuffer<float>& buffer,
+        juce::MidiBuffer& midiMessages);
+    void rebuildAdditivePartials(const std::vector<double>& series);
+    void applyAdditiveOutputProcessing(juce::AudioBuffer<float>& buffer);
+    void publishEditedAdditivePartials();
+    void applyGlobalAdditiveShaping(std::vector<AdditivePartial>& partials) const;
+    void advanceAdditiveAutoMorph(int numSamples);
+    void saveAdditiveEditsToState();
+    void loadAdditiveEditsFromState();
+    std::vector<AdditivePartial> buildEditedAdditiveBaseLocked() const;
+    void saveAdditiveMorphSourcesToState();
+    void loadAdditiveMorphSourcesFromState();
     void parameterChanged(
         const juce::String& parameterID, float newValue) override;
     void handleAsyncUpdate() override;
@@ -126,6 +159,28 @@ private:
     std::atomic<int> modulationCycleStart{ 0 };
     std::atomic<int> modulationCycleEnd{ -1 };
     std::shared_ptr<const std::vector<float>> wavetable;
+    std::shared_ptr<const std::vector<AdditivePartial>> additivePartials;
+    std::shared_ptr<const std::vector<AdditivePartial>> activeAdditivePartials;
+    std::shared_ptr<const std::vector<AdditivePartial>> previousAdditivePartials;
+    int additiveCrossfadeSamplesRemaining = 0;
+    int additiveCrossfadeLengthSamples = 1;
+    struct AdditiveEdit
+    {
+        float level = 1.0f;
+        float ratio = 1.0f;
+    };
+    mutable juce::CriticalSection additiveEditLock;
+    std::vector<AdditivePartial> additiveBasePartials;
+    std::map<int, AdditiveEdit> additiveEdits;
+    std::vector<AdditivePartial> additiveMorphSourceA;
+    std::vector<AdditivePartial> additiveMorphSourceB;
+    int additiveMorphCycleA = -1;
+    int additiveMorphCycleB = -1;
+    std::atomic<bool> additiveShapingUpdatePending{ false };
+    std::atomic<bool> wavetableRebuildPending{ false };
+    std::atomic<float> additiveAutoMorphValue{ 0.0f };
+    double additiveAutoMorphPhase = 0.0;
+    int additiveAutoMorphUpdateCountdown = 0;
     std::shared_ptr<const std::vector<float>> activeWavetable;
     std::shared_ptr<const std::vector<float>> previousWavetable;
     int wavetableCrossfadeSamplesRemaining = 0;
@@ -136,6 +191,7 @@ private:
     std::vector<std::vector<double>> wavetableFrameSources;
 
     double wavetablePhase = 0.0;
+    double additivePhase = 0.0;
     double modulationPhase = 0.0;
     int wavetableNote = 48;
     float wavetableVelocity = 0.0f;
