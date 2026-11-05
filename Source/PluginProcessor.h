@@ -9,6 +9,7 @@
 #pragma once
 
 #include <JuceHeader.h>
+#include <array>
 #include <map>
 
 //==============================================================================
@@ -181,6 +182,20 @@ private:
     std::atomic<float> additiveAutoMorphValue{ 0.0f };
     double additiveAutoMorphPhase = 0.0;
     int additiveAutoMorphUpdateCountdown = 0;
+    struct AdditiveVoice
+    {
+        int midiNote = -1;
+        float velocity = 0.0f;
+        double phase = 0.0;
+        uint64_t age = 0;
+        bool active = false;
+        bool keyDown = false;
+        bool audition = false;
+        juce::ADSR envelope;
+    };
+    static constexpr int additiveVoiceCount = 8;
+    std::array<AdditiveVoice, additiveVoiceCount> additiveVoices;
+    uint64_t additiveVoiceAgeCounter = 0;
     std::shared_ptr<const std::vector<float>> activeWavetable;
     std::shared_ptr<const std::vector<float>> previousWavetable;
     int wavetableCrossfadeSamplesRemaining = 0;
@@ -191,7 +206,6 @@ private:
     std::vector<std::vector<double>> wavetableFrameSources;
 
     double wavetablePhase = 0.0;
-    double additivePhase = 0.0;
     double modulationPhase = 0.0;
     int wavetableNote = 48;
     float wavetableVelocity = 0.0f;

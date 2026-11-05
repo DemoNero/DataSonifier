@@ -157,7 +157,19 @@ void DataSonifierAudioProcessor::prepareToPlay(
     currentPlaybackIndex.store(-1);
     wasTransportPlaying = false;
     wavetablePhase = 0.0;
-    additivePhase = 0.0;
+    additiveVoiceAgeCounter = 0;
+    for (auto& voice : additiveVoices)
+    {
+        voice.midiNote = -1;
+        voice.velocity = 0.0f;
+        voice.phase = 0.0;
+        voice.age = 0;
+        voice.active = false;
+        voice.keyDown = false;
+        voice.audition = false;
+        voice.envelope.setSampleRate(sampleRate);
+        voice.envelope.reset();
+    }
     activeAdditivePartials.reset();
     previousAdditivePartials.reset();
     additiveCrossfadeSamplesRemaining = 0;
@@ -1875,28 +1887,117 @@ void DataSonifierAudioProcessor::processAdditiveSynth(
         .getRawParameterValue("wavetableSustain")->load();
     envelopeParameters.release = parameterState
         .getRawParameterValue("wavetableRelease")->load();
-    wavetableEnvelope.setParameters(envelopeParameters);
+    for (auto& voice : additiveVoices)
+        voice.envelope.setParameters(envelopeParameters);
+
+    const auto stopAuditionVoices = [this](bool immediately)
+    {
+        for (auto& voice : additiveVoices)
+        {
+            if (!voice.active || !voice.audition)
+                continue;
+            voice.keyDown = false;
+            if (immediately)
+            {
+                voice.envelope.reset();
+                voice.active = false;
+                voice.audition = false;
+            }
+            else
+                voice.envelope.noteOff();
+        }
+    };
+
+    const auto startVoice = [this](int note, float velocity, bool audition)
+    {
+        AdditiveVoice* selected = nullptr;
+        if (!audition)
+        {
+            for (auto& voice : additiveVoices)
+            {
+                if (voice.active && !voice.audition
+                    && voice.midiNote == note)
+                {
+                    selected = &voice;
+                    break;
+                }
+            }
+        }
+        if (selected == nullptr)
+        {
+            for (auto& voice : additiveVoices)
+            {
+                if (!voice.active)
+                {
+                    selected = &voice;
+                    break;
+                }
+            }
+        }
+        if (selected == nullptr)
+        {
+            selected = &*std::min_element(additiveVoices.begin(),
+                additiveVoices.end(),
+                [](const AdditiveVoice& left, const AdditiveVoice& right)
+                {
+                    return left.age < right.age;
+                });
+        }
+
+        selected->envelope.reset();
+        selected->midiNote = note;
+        selected->velocity = velocity;
+        selected->phase = 0.0;
+        selected->age = ++additiveVoiceAgeCounter;
+        selected->active = true;
+        selected->keyDown = true;
+        selected->audition = audition;
+        selected->envelope.noteOn();
+    };
 
     for (const auto metadata : midiMessages)
     {
         const auto message = metadata.getMessage();
         if (message.isNoteOn())
         {
-            wavetableNote = message.getNoteNumber();
-            wavetableVelocity = message.getFloatVelocity();
-            wavetableKeyDown = true;
-            auditionEnvelopeActive = false;
             auditionSamplesRemaining.store(0);
-            additivePhase = 0.0;
-            wavetableEnvelope.noteOn();
+            stopAuditionVoices(true);
+            startVoice(message.getNoteNumber(),
+                message.getFloatVelocity(), false);
         }
-        else if ((message.isNoteOff()
-                    && message.getNoteNumber() == wavetableNote)
-                 || message.isAllNotesOff()
-                 || message.isAllSoundOff())
+        else if (message.isNoteOff())
         {
-            wavetableKeyDown = false;
-            wavetableEnvelope.noteOff();
+            for (auto& voice : additiveVoices)
+            {
+                if (voice.active && !voice.audition
+                    && voice.midiNote == message.getNoteNumber())
+                {
+                    voice.keyDown = false;
+                    voice.envelope.noteOff();
+                }
+            }
+        }
+        else if (message.isAllSoundOff())
+        {
+            for (auto& voice : additiveVoices)
+            {
+                voice.envelope.reset();
+                voice.active = false;
+                voice.keyDown = false;
+                voice.audition = false;
+            }
+            auditionSamplesRemaining.store(0);
+        }
+        else if (message.isAllNotesOff())
+        {
+            auditionSamplesRemaining.store(0);
+            for (auto& voice : additiveVoices)
+            {
+                if (!voice.active)
+                    continue;
+                voice.keyDown = false;
+                voice.envelope.noteOff();
+            }
         }
     }
     midiMessages.clear();
@@ -1911,28 +2012,26 @@ void DataSonifierAudioProcessor::processAdditiveSynth(
     }
     const auto partials = activeAdditivePartials;
     const bool auditioning = auditionSamplesRemaining.load() > 0;
-    if (auditioning && !wavetableKeyDown && !auditionEnvelopeActive)
+    const bool hasAuditionVoice = std::any_of(
+        additiveVoices.begin(), additiveVoices.end(),
+        [](const AdditiveVoice& voice)
+        {
+            return voice.active && voice.audition;
+        });
+    if (auditioning && !hasAuditionVoice)
     {
-        wavetableNote = 48;
-        wavetableVelocity = 0.8f;
-        auditionEnvelopeActive = true;
-        additivePhase = 0.0;
-        wavetableEnvelope.noteOn();
+        startVoice(48, 0.8f, true);
     }
 
-    if (partials == nullptr || partials->empty()
-        || (!wavetableEnvelope.isActive() && !auditioning))
+    const bool hasActiveVoice = std::any_of(
+        additiveVoices.begin(), additiveVoices.end(),
+        [](const AdditiveVoice& voice) { return voice.active; });
+    if (partials == nullptr || partials->empty() || !hasActiveVoice)
         return;
 
-    const double fundamental = juce::MidiMessage::getMidiNoteInHertz(
-        wavetableNote);
-    const double phaseIncrement = fundamental / currentSampleRate;
-    // Match the wavetable engine's pre-envelope level so switching engines
-    // compares synthesis character rather than a 6 dB loudness difference.
-    const float voiceGain = 0.18f * wavetableVelocity;
-
-    const auto renderBank = [this, fundamental](
-        const std::shared_ptr<const std::vector<AdditivePartial>>& bank)
+    const auto renderBank = [this](
+        const std::shared_ptr<const std::vector<AdditivePartial>>& bank,
+        double fundamental, double phase)
     {
         float value = 0.0f;
         if (bank == nullptr)
@@ -1944,7 +2043,7 @@ void DataSonifierAudioProcessor::processAdditiveSynth(
                 continue;
             value += partial.amplitude * std::cos(
                 juce::MathConstants<double>::twoPi
-                    * additivePhase * partial.frequencyRatio
+                    * phase * partial.frequencyRatio
                 + partial.phase);
         }
         return value;
@@ -1952,28 +2051,54 @@ void DataSonifierAudioProcessor::processAdditiveSynth(
 
     for (int sample = 0; sample < buffer.getNumSamples(); ++sample)
     {
-        float oscillatorValue = renderBank(partials);
-        if (additiveCrossfadeSamplesRemaining > 0
-            && previousAdditivePartials != nullptr)
+        const bool crossfading = additiveCrossfadeSamplesRemaining > 0
+            && previousAdditivePartials != nullptr;
+        const float fade = crossfading
+            ? 1.0f - static_cast<float>(additiveCrossfadeSamplesRemaining)
+                / static_cast<float>(additiveCrossfadeLengthSamples)
+            : 1.0f;
+        float mixedVoices = 0.0f;
+
+        for (auto& voice : additiveVoices)
         {
-            const float fade = 1.0f
-                - static_cast<float>(additiveCrossfadeSamplesRemaining)
-                    / static_cast<float>(additiveCrossfadeLengthSamples);
-            oscillatorValue = juce::jmap(fade,
-                renderBank(previousAdditivePartials), oscillatorValue);
-            if (--additiveCrossfadeSamplesRemaining == 0)
-                previousAdditivePartials.reset();
+            if (!voice.active)
+                continue;
+
+            const double fundamental = juce::MidiMessage::getMidiNoteInHertz(
+                voice.midiNote);
+            float oscillatorValue = renderBank(
+                partials, fundamental, voice.phase);
+            if (crossfading)
+            {
+                oscillatorValue = juce::jmap(fade,
+                    renderBank(previousAdditivePartials,
+                        fundamental, voice.phase),
+                    oscillatorValue);
+            }
+
+            const float envelope = voice.envelope.getNextSample();
+            mixedVoices += juce::jlimit(-1.0f, 1.0f, oscillatorValue)
+                * (0.18f * voice.velocity) * envelope;
+            voice.phase += fundamental / currentSampleRate;
+            voice.phase -= std::floor(voice.phase);
+
+            if (!voice.envelope.isActive())
+            {
+                voice.active = false;
+                voice.keyDown = false;
+                voice.audition = false;
+            }
         }
 
-        const float value = juce::jlimit(-1.0f, 1.0f, oscillatorValue)
-            * voiceGain * wavetableEnvelope.getNextSample();
+        if (crossfading
+            && --additiveCrossfadeSamplesRemaining == 0)
+            previousAdditivePartials.reset();
+
+        const float value = juce::jlimit(-1.0f, 1.0f, mixedVoices);
         for (int channel = 0; channel < buffer.getNumChannels(); ++channel)
             buffer.setSample(channel, sample, value);
 
-        additivePhase += phaseIncrement;
-        additivePhase -= std::floor(additivePhase);
-
-        if (auditionEnvelopeActive && !wavetableKeyDown)
+        if (auditioning)
         {
             const int remaining = auditionSamplesRemaining.load();
             if (remaining > 1)
@@ -1981,8 +2106,7 @@ void DataSonifierAudioProcessor::processAdditiveSynth(
             else if (remaining == 1)
             {
                 auditionSamplesRemaining.store(0);
-                auditionEnvelopeActive = false;
-                wavetableEnvelope.noteOff();
+                stopAuditionVoices(false);
             }
         }
     }
